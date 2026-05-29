@@ -71,19 +71,6 @@
             font-size: 12px;
             outline: none;
         }
-        select:focus {
-            border-color: #58a6ff;
-        }
-        .slider-container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        input[type="range"] {
-            width: 100%;
-            accent-color: #58a6ff;
-            margin-top: 5px;
-        }
         #canvas-container {
             flex: 1;
             position: relative;
@@ -113,11 +100,7 @@
                 <option value="tele">Tele Broadcast (Standard View)</option>
                 <option value="tactical">Tactical Ortho (Flat Radar)</option>
             </select>
-            <div style="margin-top: 6px;">
-                <div class="slider-container">
-                    <label>Dynamic Pitch Angle</label>
-                    <span id="angleVal" style="font-size: 11px; color:#58a6ff;">52°</span>
-                </div>
+            <div style="margin-top: 6px; display: none;">
                 <input type="range" id="pitchAngle" min="20" max="90" value="52">
             </div>
         </div>
@@ -143,53 +126,40 @@
         </div>
 
         <div class="control-group">
-            <label>Team A Core Mask</label>
+            <label>Team A Mask</label>
             <select id="colorTeamA">
                 <option value="#00ffff" selected>Neon Cyan</option>
                 <option value="#ff00ff">Neon Magenta</option>
                 <option value="#ffff00">Neon Yellow</option>
                 <option value="#ffffff">Pure White</option>
-                <option value="#ff003c">High-Vis Red</option>
-                <option value="#002244">Navy Blue</option>
-                <option value="#000000">Absolute Black</option>
             </select>
         </div>
 
         <div class="control-group">
-            <label>Team B Core Mask</label>
+            <label>Team B Mask</label>
             <select id="colorTeamB">
                 <option value="#ff00ff" selected>Neon Magenta</option>
                 <option value="#00ffff">Neon Cyan</option>
                 <option value="#ffff00">Neon Yellow</option>
                 <option value="#ffffff">Pure White</option>
-                <option value="#ff003c">High-Vis Red</option>
-                <option value="#002244">Navy Blue</option>
-                <option value="#000000">Absolute Black</option>
             </select>
         </div>
 
         <div class="control-group">
-            <label>Match Official Mask</label>
+            <label>Match Official</label>
             <select id="colorRef">
                 <option value="#ffff00" selected>Neon Yellow</option>
-                <option value="#00ffff">Neon Cyan</option>
-                <option value="#ff00ff">Neon Magenta</option>
                 <option value="#ffffff">Pure White</option>
-                <option value="#ff003c">High-Vis Red</option>
-                <option value="#002244">Navy Blue</option>
                 <option value="#000000">Absolute Black</option>
             </select>
         </div>
 
         <div class="control-group">
-            <label>Ball Tracking Asset</label>
+            <label>Ball Tracker</label>
             <select id="colorBall">
                 <option value="#ffffff" selected>Pure White</option>
                 <option value="#ffff00">Neon Yellow</option>
-                <option value="#00ffff">Neon Cyan</option>
-                <option value="#ff00ff">Neon Magenta</option>
                 <option value="#ff003c">High-Vis Red</option>
-                <option value="#000000">Absolute Black</option>
             </select>
         </div>
     </div>
@@ -206,7 +176,6 @@
         // UI Hooks
         const cameraPreset = document.getElementById('cameraPreset');
         const pitchAngleSlider = document.getElementById('pitchAngle');
-        const angleValDisplay = document.getElementById('angleVal');
         const formationASelect = document.getElementById('formationA');
         const formationBSelect = document.getElementById('formationB');
         const colorTeamA = document.getElementById('colorTeamA');
@@ -218,35 +187,37 @@
         const pitchHeight = 680;
 
         let players = [];
-        let referee = { x: 525, y: 340, targetX: 525, targetY: 340 };
+        let referee = { x: 525, y: 340, vx: 0, vy: 0, targetX: 525, targetY: 340 };
         let ball = { x: 525, y: 340, vx: 0, vy: 0, owner: null, lastOwner: null, cooldown: 0 };
+        
+        // Global Match Context (Prepped for step 2)
+        let matchPhase = "TRANSITION"; // ATTACK_A, ATTACK_B, TRANSITION
 
-        // Tactical Matrix Offsets Configuration
         const formationTemplates = {
             "442": [
-                {r: 'GK', x: 50, y: 340},
-                {r: 'LB', x: 220, y: 100}, {r: 'LCB', x: 200, y: 240}, {r: 'RCB', x: 200, y: 440}, {r: 'RB', x: 220, y: 580},
-                {r: 'LM', x: 420, y: 100}, {r: 'LCM', x: 400, y: 250}, {r: 'RCM', x: 400, y: 430}, {r: 'RM', x: 420, y: 580},
-                {r: 'ST1', x: 520, y: 250}, {r: 'ST2', x: 520, y: 430}
+                {r: 'GK', x: 60, y: 340},
+                {r: 'LB', x: 240, y: 120}, {r: 'LCB', x: 210, y: 250}, {r: 'RCB', x: 210, y: 430}, {r: 'RB', x: 240, y: 560},
+                {r: 'LM', x: 440, y: 120}, {r: 'LCM', x: 410, y: 260}, {r: 'RCM', x: 410, y: 420}, {r: 'RM', x: 440, y: 560},
+                {r: 'ST1', x: 530, y: 260}, {r: 'ST2', x: 530, y: 420}
             ],
             "433": [
-                {r: 'GK', x: 50, y: 340},
-                {r: 'LB', x: 220, y: 100}, {r: 'LCB', x: 200, y: 240}, {r: 'RCB', x: 200, y: 440}, {r: 'RB', x: 220, y: 580},
-                {r: 'LCM', x: 380, y: 180}, {r: 'CM', x: 360, y: 340}, {r: 'RCM', x: 380, y: 500},
-                {r: 'LW', x: 520, y: 120}, {r: 'ST', x: 530, y: 340}, {r: 'RW', x: 520, y: 560}
+                {r: 'GK', x: 60, y: 340},
+                {r: 'LB', x: 240, y: 120}, {r: 'LCB', x: 210, y: 250}, {r: 'RCB', x: 210, y: 430}, {r: 'RB', x: 240, y: 560},
+                {r: 'LCM', x: 390, y: 200}, {r: 'CM', x: 370, y: 340}, {r: 'RCM', x: 390, y: 480},
+                {r: 'LW', x: 530, y: 140}, {r: 'ST', x: 540, y: 340}, {r: 'RW', x: 530, y: 540}
             ],
             "451": [
-                {r: 'GK', x: 50, y: 340},
-                {r: 'LB', x: 200, y: 90}, {r: 'LCB', x: 180, y: 240}, {r: 'RCB', x: 180, y: 440}, {r: 'RB', x: 200, y: 590},
-                {r: 'LM', x: 380, y: 100}, {r: 'LCM', x: 350, y: 220}, {r: 'CM', x: 340, y: 340}, {r: 'RCM', x: 350, y: 460}, {r: 'RM', x: 380, y: 580},
-                {r: 'ST', x: 480, y: 340}
+                {r: 'GK', x: 60, y: 340},
+                {r: 'LB', x: 220, y: 110}, {r: 'LCB', x: 190, y: 250}, {r: 'RCB', x: 190, y: 430}, {r: 'RB', x: 220, y: 570},
+                {r: 'LM', x: 400, y: 120}, {r: 'LCM', x: 370, y: 240}, {r: 'CM', x: 360, y: 340}, {r: 'RCM', x: 370, y: 460}, {r: 'RM', x: 400, y: 560},
+                {r: 'ST', x: 500, y: 340}
             ],
             "4141": [
-                {r: 'GK', x: 50, y: 340},
-                {r: 'LB', x: 220, y: 90}, {r: 'LCB', x: 200, y: 240}, {r: 'RCB', x: 200, y: 440}, {r: 'RB', x: 220, y: 590},
-                {r: 'DM', x: 300, y: 340},
-                {r: 'LM', x: 420, y: 100}, {r: 'LCM', x: 400, y: 230}, {r: 'RCM', x: 400, y: 450}, {r: 'RM', x: 420, y: 580},
-                {r: 'ST', x: 520, y: 340}
+                {r: 'GK', x: 60, y: 340},
+                {r: 'LB', x: 240, y: 110}, {r: 'LCB', x: 210, y: 250}, {r: 'RCB', x: 210, y: 430}, {r: 'RB', x: 240, y: 570},
+                {r: 'DM', x: 320, y: 340},
+                {r: 'LM', x: 440, y: 120}, {r: 'LCM', x: 410, y: 240}, {r: 'RCM', x: 410, y: 440}, {r: 'RM', x: 440, y: 560},
+                {r: 'ST', x: 530, y: 340}
             ]
         };
 
@@ -255,43 +226,34 @@
             const formA = formationTemplates[formationASelect.value];
             const formB = formationTemplates[formationBSelect.value];
 
-            // Build Team A (Left to Right coordinate map)
             formA.forEach((pos, index) => {
                 players.push({
                     id: 'A' + index, team: 'A', role: pos.r,
+                    x: pos.x, y: pos.y, vx: 0, vy: 0,
                     homeX: pos.x, homeY: pos.y,
-                    x: pos.x, y: pos.y,
                     baseHomeX: pos.x, baseHomeY: pos.y
                 });
             });
 
-            // Build Team B (Mirrored Right to Left coordinate map)
             formB.forEach((pos, index) => {
                 let mirroredX = pitchWidth - pos.x;
                 players.push({
                     id: 'B' + index, team: 'B', role: pos.r,
+                    x: mirroredX, y: pos.y, vx: 0, vy: 0,
                     homeX: mirroredX, homeY: pos.y,
-                    x: mirroredX, y: pos.y,
                     baseHomeX: mirroredX, baseHomeY: pos.y
                 });
             });
 
-            ball.owner = null;
-            ball.lastOwner = null;
-            ball.x = 525; ball.y = 340;
-            ball.vx = 0; ball.vy = 0;
+            ball.owner = null; ball.lastOwner = null;
+            ball.x = 525; ball.y = 340; ball.vx = 0; ball.vy = 0;
         }
 
-        // Perspective Transformation (Corrected Z-Depth Vector Scaling)
         function projectCoordinate(x, y) {
             let angleRad = (pitchAngleSlider.value * Math.PI) / 180;
-            
             let cx = x - pitchWidth / 2;
             let cy = y - pitchHeight / 2;
-
             let projectedY = cy * Math.sin(angleRad);
-            
-            // Fixed: Minus sign compresses top negative coordinates and widens positive bottom assets
             let zDepth = 1 - (cy * Math.cos(angleRad)) / 800; 
             let projectedX = cx / zDepth;
 
@@ -316,9 +278,8 @@
             const bands = 15;
             const bandWidth = pitchWidth / bands;
 
-            // Render Alternating High-Vis Gray Zones
             for (let i = 0; i < bands; i++) {
-                ctx.fillStyle = (i % 2 === 0) ? '#484e54' : '#3f444a';
+                ctx.fillStyle = (i % 2 === 0) ? '#383e42' : '#303538';
                 ctx.beginPath();
                 let pTl = projectCoordinate(i * bandWidth, 0);
                 let pTr = projectCoordinate((i + 1) * bandWidth, 0);
@@ -328,23 +289,19 @@
                 ctx.closePath(); ctx.fill();
             }
 
-            // High-Contrast White Layout Markings
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
             ctx.lineWidth = 2.5;
 
-            // Perimeter Touchlines
             ctx.beginPath();
             let tl = projectCoordinate(0, 0); let tr = projectCoordinate(pitchWidth, 0);
             let br = projectCoordinate(pitchWidth, pitchHeight); let bl = projectCoordinate(0, pitchHeight);
             ctx.moveTo(tl.x, tl.y); ctx.lineTo(tr.x, tr.y); ctx.lineTo(br.x, br.y); ctx.lineTo(bl.x, bl.y);
             ctx.closePath(); ctx.stroke();
 
-            // Halfway Dividing Vector
             ctx.beginPath();
             let midTop = projectCoordinate(pitchWidth / 2, 0); let midBot = projectCoordinate(pitchWidth / 2, pitchHeight);
             ctx.moveTo(midTop.x, midTop.y); ctx.lineTo(midBot.x, midBot.y); ctx.stroke();
 
-            // Regulation Center Circle
             ctx.beginPath();
             let radius = 91.5;
             for (let a = 0; a <= 360; a += 6) {
@@ -354,14 +311,13 @@
             }
             ctx.stroke();
 
-            // Penalty Box Left
+            // Penalty Areas
             ctx.beginPath();
             let boxL1 = projectCoordinate(0, 138); let boxL2 = projectCoordinate(165, 138);
             let boxL3 = projectCoordinate(165, 542); let boxL4 = projectCoordinate(0, 542);
             ctx.moveTo(boxL1.x, boxL1.y); ctx.lineTo(boxL2.x, boxL2.y); ctx.lineTo(boxL3.x, boxL3.y); ctx.lineTo(boxL4.x, boxL4.y);
             ctx.stroke();
 
-            // Penalty Box Right
             ctx.beginPath();
             let boxR1 = projectCoordinate(pitchWidth, 138); let boxR2 = projectCoordinate(pitchWidth - 165, 138);
             let boxR3 = projectCoordinate(pitchWidth - 165, 542); let boxR4 = projectCoordinate(pitchWidth, 542);
@@ -372,78 +328,85 @@
         function enginePhysicsStep() {
             if (ball.cooldown > 0) ball.cooldown--;
 
-            // 1. Shift Tactical Shape Blocks Based on Ball Center of Mass
+            // 1. Calculate Calibrated Player Movement with Weighted Kinematics
             players.forEach(p => {
-                let ballBiasX = (ball.x - pitchWidth / 2) * 0.25;
-                let ballBiasY = (ball.y - p.baseHomeY) * 0.2;
+                let targetX = p.baseHomeX + (ball.x - pitchWidth / 2) * 0.22;
+                let targetY = p.baseHomeY + (ball.y - p.baseHomeY) * 0.15;
                 
-                if (p.role === 'GK') ballBiasX = 0; // Lock keeper logic to line
+                if (p.role === 'GK') targetX = p.baseHomeX;
 
-                p.homeX = p.baseHomeX + ballBiasX;
-                p.homeY = p.baseHomeY + ballBiasY;
-
-                // If chasing a loose ball
-                if (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 220) {
-                    p.x += (ball.x - p.x) * 0.04;
-                    p.y += (ball.y - p.y) * 0.04;
-                } else {
-                    // Return to dynamic tactical formation structure
-                    p.x += (p.homeX - p.x) * 0.025;
-                    p.y += (p.homeY - p.y) * 0.025;
+                // Loose Ball Scramble Matrix
+                if (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 180) {
+                    targetX = ball.x;
+                    targetY = ball.y;
                 }
 
-                // Micro-jitter to mimic organic player direction adjustments
-                p.x += (Math.random() - 0.5) * 0.8;
-                p.y += (Math.random() - 0.5) * 0.8;
+                let dx = targetX - p.x;
+                let dy = targetY - p.y;
+                let dist = Math.hypot(dx, dy);
+
+                if (dist > 2) {
+                    // Gradual accumulation of velocity vectors (Inertia)
+                    p.vx += (dx / dist) * 0.08;
+                    p.vy += (dy / dist) * 0.08;
+                }
+
+                // Apply Strict Maximum Human Speed Caps
+                let maxSpeed = (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 180) ? 2.2 : 1.3;
+                let currentSpeed = Math.hypot(p.vx, p.vy);
+                if (currentSpeed > maxSpeed) {
+                    p.vx = (p.vx / currentSpeed) * maxSpeed;
+                    p.vy = (p.vy / currentSpeed) * maxSpeed;
+                }
+
+                // Apply Ground Drag Friction
+                p.x += p.vx; p.y += p.vy;
+                p.vx *= 0.88; p.vy *= 0.88;
+
+                // Organic micro-adjustments
+                p.x += (Math.random() - 0.5) * 0.2;
+                p.y += (Math.random() - 0.5) * 0.2;
             });
 
-            // 2. Track Referee Positioning Arc
-            referee.targetX = ball.x + (pitchWidth / 2 - ball.x) * 0.2;
-            referee.targetY = ball.y + (ball.y > 340 ? -80 : 80);
-            referee.x += (referee.targetX - referee.x) * 0.03;
-            referee.y += (referee.targetY - referee.y) * 0.03;
-
-            // 3. Ball Possession and Passing Engine
+            // 2. Heavy Friction Ball Dynamics
             if (ball.owner) {
                 ball.x = ball.owner.x;
                 ball.y = ball.owner.y;
                 ball.vx = 0; ball.vy = 0;
 
-                // Automated Tactical Passing Sequence Logic
-                if (Math.random() < 0.015) { 
+                // Regulated passing cadence
+                if (Math.random() < 0.012) { 
                     let teammates = players.filter(p => p.team === ball.owner.team && p.id !== ball.owner.id);
                     let recipient = teammates[Math.floor(Math.random() * teammates.length)];
                     
                     ball.lastOwner = ball.owner;
                     ball.owner = null;
-                    ball.cooldown = 15; // Frames before passer re-engages
+                    ball.cooldown = 20;
 
                     let dx = recipient.x - ball.x;
                     let dy = recipient.y - ball.y;
                     let dist = Math.hypot(dx, dy);
                     
-                    // Fire ball along normalized vector target
-                    ball.vx = (dx / dist) * 7.5;
-                    ball.vy = (dy / dist) * 7.5;
+                    // Slower initial velocity vector
+                    ball.vx = (dx / dist) * 5.2;
+                    ball.vy = (dy / dist) * 5.2;
                 }
             } else {
-                // Ball Flight Momentum Step
                 ball.x += ball.vx;
                 ball.y += ball.vy;
-                ball.vx *= 0.98; // Friction damping
-                ball.vy *= 0.98;
+                
+                // Enhanced Drag Coefficient (slowing down the rolling speed)
+                ball.vx *= 0.965; 
+                ball.vy *= 0.965;
 
-                // Boundary Rebound Correction
                 if (ball.x < 0 || ball.x > pitchWidth) ball.vx *= -1;
                 if (ball.y < 0 || ball.y > pitchHeight) ball.vy *= -1;
 
-                // Check Proximity Interceptions
                 let idealGrabber = null;
-                let closestDist = 14; 
+                let closestDist = 12; // Precise interaction radius
 
                 players.forEach(p => {
                     if (ball.lastOwner && ball.lastOwner.id === p.id && ball.cooldown > 0) return;
-                    
                     let dist = Math.hypot(ball.x - p.x, ball.y - p.y);
                     if (dist < closestDist) {
                         closestDist = dist;
@@ -453,71 +416,64 @@
 
                 if (idealGrabber) {
                     ball.owner = idealGrabber;
+                    matchPhase = (ball.owner.team === 'A') ? "ATTACK_A" : "ATTACK_B";
                 }
 
-                // If momentum dies out completely, force a long ball pass structure
-                if (Math.abs(ball.vx) + Math.abs(ball.vy) < 0.15) {
+                if (Math.abs(ball.vx) + Math.abs(ball.vy) < 0.12) {
                     let randomPlayer = players[Math.floor(Math.random() * players.length)];
                     ball.owner = randomPlayer;
+                    matchPhase = (ball.owner.team === 'A') ? "ATTACK_A" : "ATTACK_B";
                 }
             }
+
+            // 3. Match Official Track
+            referee.targetX = ball.x + (pitchWidth / 2 - ball.x) * 0.25;
+            referee.targetY = ball.y + (ball.y > 340 ? -100 : 100);
+            let rDx = referee.targetX - referee.x;
+            let rDy = referee.targetY - referee.y;
+            referee.vx += (rDx / Math.max(1, Math.hypot(rDx, rDy))) * 0.05;
+            referee.vy += (rDy / Math.max(1, Math.hypot(rDx, rDy))) * 0.05;
+            referee.x += referee.vx; referee.y += referee.vy;
+            referee.vx *= 0.85; referee.vy *= 0.85;
         }
 
         function renderExecutionPipeline() {
             enginePhysicsStep();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // 1. Draw Geometric Pitch Background
             drawHighContrastPitch();
 
-            // 2. Draw Match Official Core Asset
             let refPos = projectCoordinate(referee.x, referee.y);
             ctx.fillStyle = colorRef.value;
-            ctx.beginPath(); ctx.arc(refPos.x, refPos.y, 7, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(refPos.x, refPos.y, 6.5, 0, Math.PI * 2); ctx.fill();
 
-            // 3. Draw Full-Body Outlined Player Masks
             players.forEach(p => {
                 let pos = projectCoordinate(p.x, p.y);
                 ctx.fillStyle = (p.team === 'A') ? colorTeamA.value : colorTeamB.value;
-                ctx.beginPath();
-                ctx.arc(pos.x, pos.y, 7.5, 0, Math.PI * 2);
-                ctx.fill();
+                ctx.beginPath(); ctx.arc(pos.x, pos.y, 7, 0, Math.PI * 2); ctx.fill();
             });
 
-            // 4. Draw Ball Asset
             let ballPos = projectCoordinate(ball.x, ball.y);
             ctx.fillStyle = colorBall.value;
-            ctx.beginPath();
-            ctx.arc(ballPos.x, ballPos.y, 4.5, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.beginPath(); ctx.arc(ballPos.x, ballPos.y, 4, 0, Math.PI * 2); ctx.fill();
 
             requestAnimationFrame(renderExecutionPipeline);
         }
 
-        // Event Handling Hooks
         cameraPreset.addEventListener('change', (e) => {
             if (e.target.value === 'coop') pitchAngleSlider.value = 52;
             else if (e.target.value === 'tele') pitchAngleSlider.value = 34;
             else if (e.target.value === 'tactical') pitchAngleSlider.value = 90;
-            angleValDisplay.textContent = pitchAngleSlider.value + "°";
-        });
-
-        pitchAngleSlider.addEventListener('input', (e) => {
-            angleValDisplay.textContent = e.target.value + "°";
-            cameraPreset.value = "custom";
         });
 
         formationASelect.addEventListener('change', buildMatchSquads);
         formationBSelect.addEventListener('change', buildMatchSquads);
-
         window.addEventListener('dblclick', () => {
             document.body.classList.toggle('sidebar-hidden');
             setTimeout(resizeCanvasViewport, 60);
         });
-
         window.addEventListener('resize', resizeCanvasViewport);
 
-        // Core Initialization
         resizeCanvasViewport();
         buildMatchSquads();
         renderExecutionPipeline();
