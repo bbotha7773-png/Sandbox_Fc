@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FC High-Contrast Simulation Sandbox</title>
+    <title>FC High-Contrast Tactical Simulation Sandbox</title>
     <style>
         * {
             box-sizing: border-box;
@@ -26,7 +26,7 @@
             display: flex;
             flex-direction: column;
             padding: 20px;
-            gap: 20px;
+            gap: 15px;
             z-index: 10;
             overflow-y: auto;
         }
@@ -61,7 +61,7 @@
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
-        select, slider {
+        select {
             width: 100%;
             background: #21262d;
             border: 1px solid #30363d;
@@ -109,17 +109,37 @@
         <div class="control-group">
             <label>Camera Perspective Profile</label>
             <select id="cameraPreset">
-                <option value="coop">Co-Op View (Elevated Structure)</option>
+                <option value="coop" selected>Co-Op View (Elevated Structure)</option>
                 <option value="tele">Tele Broadcast (Standard View)</option>
                 <option value="tactical">Tactical Ortho (Flat Radar)</option>
             </select>
-            <div style="margin-top: 8px;">
+            <div style="margin-top: 6px;">
                 <div class="slider-container">
                     <label>Dynamic Pitch Angle</label>
-                    <span id="angleVal" style="font-size: 11px; color:#58a6ff;">45°</span>
+                    <span id="angleVal" style="font-size: 11px; color:#58a6ff;">52°</span>
                 </div>
-                <input type="range" id="pitchAngle" min="20" max="90" value="45">
+                <input type="range" id="pitchAngle" min="20" max="90" value="52">
             </div>
+        </div>
+
+        <div class="control-group">
+            <label>Team A Tactical Bloc</label>
+            <select id="formationA">
+                <option value="442">4 - 4 - 2 Traditional</option>
+                <option value="433" selected>4 - 3 - 3 Attacking Width</option>
+                <option value="451">4 - 5 - 1 Low Block</option>
+                <option value="4141">4 - 1 - 4 - 1 Rigid Pivot</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Team B Tactical Bloc</label>
+            <select id="formationB">
+                <option value="442" selected>4 - 4 - 2 Traditional</option>
+                <option value="433">4 - 3 - 3 Attacking Width</option>
+                <option value="451">4 - 5 - 1 Low Block</option>
+                <option value="4141">4 - 1 - 4 - 1 Rigid Pivot</option>
+            </select>
         </div>
 
         <div class="control-group">
@@ -183,56 +203,101 @@
         const ctx = canvas.getContext('2d');
         const container = document.getElementById('canvas-container');
 
-        // UI Target Hooks
+        // UI Hooks
         const cameraPreset = document.getElementById('cameraPreset');
         const pitchAngleSlider = document.getElementById('pitchAngle');
         const angleValDisplay = document.getElementById('angleVal');
+        const formationASelect = document.getElementById('formationA');
+        const formationBSelect = document.getElementById('formationB');
         const colorTeamA = document.getElementById('colorTeamA');
         const colorTeamB = document.getElementById('colorTeamB');
         const colorRef = document.getElementById('colorRef');
         const colorBall = document.getElementById('colorBall');
 
-        // Field Dimensions Matrix (Standard 105m x 68m scaled context)
         const pitchWidth = 1050;
         const pitchHeight = 680;
 
-        // Mock Simulation State Engine Vectors
-        let entities = [];
-        function initSimulationEntities() {
-            entities = [];
-            // Team A Layout
-            for(let i=0; i<11; i++) {
-                entities.push({ type: 'A', x: 150 + Math.random()*350, y: 50 + Math.random()*580, vx: (Math.random()-0.5)*2, vy: (Math.random()-0.5)*2 });
-            }
-            // Team B Layout
-            for(let i=0; i<11; i++) {
-                entities.push({ type: 'B', x: 550 + Math.random()*350, y: 50 + Math.random()*580, vx: (Math.random()-0.5)*2, vy: (Math.random()-0.5)*2 });
-            }
-            // Referee
-            entities.push({ type: 'Ref', x: 525, y: 340, vx: (Math.random()-0.5)*1.5, vy: (Math.random()-0.5)*1.5 });
-            // Ball
-            entities.push({ type: 'Ball', x: 525, y: 340, vx: (Math.random()-0.5)*5, vy: (Math.random()-0.5)*5 });
+        let players = [];
+        let referee = { x: 525, y: 340, targetX: 525, targetY: 340 };
+        let ball = { x: 525, y: 340, vx: 0, vy: 0, owner: null, lastOwner: null, cooldown: 0 };
+
+        // Tactical Matrix Offsets Configuration
+        const formationTemplates = {
+            "442": [
+                {r: 'GK', x: 50, y: 340},
+                {r: 'LB', x: 220, y: 100}, {r: 'LCB', x: 200, y: 240}, {r: 'RCB', x: 200, y: 440}, {r: 'RB', x: 220, y: 580},
+                {r: 'LM', x: 420, y: 100}, {r: 'LCM', x: 400, y: 250}, {r: 'RCM', x: 400, y: 430}, {r: 'RM', x: 420, y: 580},
+                {r: 'ST1', x: 520, y: 250}, {r: 'ST2', x: 520, y: 430}
+            ],
+            "433": [
+                {r: 'GK', x: 50, y: 340},
+                {r: 'LB', x: 220, y: 100}, {r: 'LCB', x: 200, y: 240}, {r: 'RCB', x: 200, y: 440}, {r: 'RB', x: 220, y: 580},
+                {r: 'LCM', x: 380, y: 180}, {r: 'CM', x: 360, y: 340}, {r: 'RCM', x: 380, y: 500},
+                {r: 'LW', x: 520, y: 120}, {r: 'ST', x: 530, y: 340}, {r: 'RW', x: 520, y: 560}
+            ],
+            "451": [
+                {r: 'GK', x: 50, y: 340},
+                {r: 'LB', x: 200, y: 90}, {r: 'LCB', x: 180, y: 240}, {r: 'RCB', x: 180, y: 440}, {r: 'RB', x: 200, y: 590},
+                {r: 'LM', x: 380, y: 100}, {r: 'LCM', x: 350, y: 220}, {r: 'CM', x: 340, y: 340}, {r: 'RCM', x: 350, y: 460}, {r: 'RM', x: 380, y: 580},
+                {r: 'ST', x: 480, y: 340}
+            ],
+            "4141": [
+                {r: 'GK', x: 50, y: 340},
+                {r: 'LB', x: 220, y: 90}, {r: 'LCB', x: 200, y: 240}, {r: 'RCB', x: 200, y: 440}, {r: 'RB', x: 220, y: 590},
+                {r: 'DM', x: 300, y: 340},
+                {r: 'LM', x: 420, y: 100}, {r: 'LCM', x: 400, y: 230}, {r: 'RCM', x: 400, y: 450}, {r: 'RM', x: 420, y: 580},
+                {r: 'ST', x: 520, y: 340}
+            ]
+        };
+
+        function buildMatchSquads() {
+            players = [];
+            const formA = formationTemplates[formationASelect.value];
+            const formB = formationTemplates[formationBSelect.value];
+
+            // Build Team A (Left to Right coordinate map)
+            formA.forEach((pos, index) => {
+                players.push({
+                    id: 'A' + index, team: 'A', role: pos.r,
+                    homeX: pos.x, homeY: pos.y,
+                    x: pos.x, y: pos.y,
+                    baseHomeX: pos.x, baseHomeY: pos.y
+                });
+            });
+
+            // Build Team B (Mirrored Right to Left coordinate map)
+            formB.forEach((pos, index) => {
+                let mirroredX = pitchWidth - pos.x;
+                players.push({
+                    id: 'B' + index, team: 'B', role: pos.r,
+                    homeX: mirroredX, homeY: pos.y,
+                    x: mirroredX, y: pos.y,
+                    baseHomeX: mirroredX, baseHomeY: pos.y
+                });
+            });
+
+            ball.owner = null;
+            ball.lastOwner = null;
+            ball.x = 525; ball.y = 340;
+            ball.vx = 0; ball.vy = 0;
         }
 
-        // Perspective Projection Transformation Function
+        // Perspective Transformation (Corrected Z-Depth Vector Scaling)
         function projectCoordinate(x, y) {
             let angleRad = (pitchAngleSlider.value * Math.PI) / 180;
             
-            // Normalize origin to center of pitch canvas layout
             let cx = x - pitchWidth / 2;
             let cy = y - pitchHeight / 2;
 
-            // Apply rotation compression based on camera angle vector
             let projectedY = cy * Math.sin(angleRad);
             
-            // Apply scale distance compression factor (Z-depth simulation effect)
-            let zDepth = 1 + (cy * Math.cos(angleRad)) / 1200; 
+            // Fixed: Minus sign compresses top negative coordinates and widens positive bottom assets
+            let zDepth = 1 - (cy * Math.cos(angleRad)) / 800; 
             let projectedX = cx / zDepth;
 
-            // Shift coordinate mappings back to viewport center
             return {
-                x: canvas.width / 2 + projectedX * (canvas.width / (pitchWidth * 1.3)),
-                y: canvas.height / 2 + projectedY * (canvas.height / (pitchHeight * 1.1))
+                x: canvas.width / 2 + projectedX * (canvas.width / (pitchWidth * 1.35)),
+                y: canvas.height / 2 + projectedY * (canvas.height / (pitchHeight * 1.15))
             };
         }
 
@@ -240,127 +305,200 @@
             const aspect = pitchWidth / pitchHeight;
             let w = container.clientWidth - 40;
             let h = w / aspect;
-
             if (h > container.clientHeight - 40) {
                 h = container.clientHeight - 40;
                 w = h * aspect;
             }
-
-            canvas.width = w;
-            canvas.height = h;
+            canvas.width = w; canvas.height = h;
         }
 
-        // Render Pitch Background Pattern (High Contrast Desaturated Gray Bands)
         function drawHighContrastPitch() {
             const bands = 15;
             const bandWidth = pitchWidth / bands;
 
+            // Render Alternating High-Vis Gray Zones
             for (let i = 0; i < bands; i++) {
-                ctx.fillStyle = (i % 2 === 0) ? '#535a61' : '#4a5057';
-                
-                // Draw path points transformed through perspective lens
+                ctx.fillStyle = (i % 2 === 0) ? '#484e54' : '#3f444a';
                 ctx.beginPath();
                 let pTl = projectCoordinate(i * bandWidth, 0);
                 let pTr = projectCoordinate((i + 1) * bandWidth, 0);
                 let pBr = projectCoordinate((i + 1) * bandWidth, pitchHeight);
                 let pBl = projectCoordinate(i * bandWidth, pitchHeight);
-
-                ctx.moveTo(pTl.x, pTl.y);
-                ctx.lineTo(pTr.x, pTr.y);
-                ctx.lineTo(pBr.x, pBr.y);
-                ctx.lineTo(pBl.x, pBl.y);
-                ctx.closePath();
-                ctx.fill();
+                ctx.moveTo(pTl.x, pTl.y); ctx.lineTo(pTr.x, pTr.y); ctx.lineTo(pBr.x, pBr.y); ctx.lineTo(pBl.x, pBl.y);
+                ctx.closePath(); ctx.fill();
             }
 
-            // Draw Clean White Line Markings
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
-            ctx.lineWidth = 2;
+            // High-Contrast White Layout Markings
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.lineWidth = 2.5;
 
-            // Main Outer Boundary Ring Path
+            // Perimeter Touchlines
             ctx.beginPath();
-            let tl = projectCoordinate(0, 0);
-            let tr = projectCoordinate(pitchWidth, 0);
-            let br = projectCoordinate(pitchWidth, pitchHeight);
-            let bl = projectCoordinate(0, pitchHeight);
+            let tl = projectCoordinate(0, 0); let tr = projectCoordinate(pitchWidth, 0);
+            let br = projectCoordinate(pitchWidth, pitchHeight); let bl = projectCoordinate(0, pitchHeight);
             ctx.moveTo(tl.x, tl.y); ctx.lineTo(tr.x, tr.y); ctx.lineTo(br.x, br.y); ctx.lineTo(bl.x, bl.y);
-            ctx.closePath();
-            ctx.stroke();
+            ctx.closePath(); ctx.stroke();
 
-            // Center Line Segment
+            // Halfway Dividing Vector
             ctx.beginPath();
-            let midTop = projectCoordinate(pitchWidth / 2, 0);
-            let midBot = projectCoordinate(pitchWidth / 2, pitchHeight);
-            ctx.moveTo(midTop.x, midTop.y);
-            ctx.lineTo(midBot.x, midBot.y);
-            ctx.stroke();
+            let midTop = projectCoordinate(pitchWidth / 2, 0); let midBot = projectCoordinate(pitchWidth / 2, pitchHeight);
+            ctx.moveTo(midTop.x, midTop.y); ctx.lineTo(midBot.x, midBot.y); ctx.stroke();
 
-            // Center Circle Array tracking
+            // Regulation Center Circle
             ctx.beginPath();
-            let centerPoint = projectCoordinate(pitchWidth / 2, pitchHeight / 2);
-            let radius = 91.5; // Scaled match regulations
-            for (let a = 0; a <= 360; a += 5) {
+            let radius = 91.5;
+            for (let a = 0; a <= 360; a += 6) {
                 let rad = (a * Math.PI) / 180;
                 let pt = projectCoordinate(pitchWidth / 2 + radius * Math.cos(rad), pitchHeight / 2 + radius * Math.sin(rad));
                 if (a === 0) ctx.moveTo(pt.x, pt.y); else ctx.lineTo(pt.x, pt.y);
             }
             ctx.stroke();
+
+            // Penalty Box Left
+            ctx.beginPath();
+            let boxL1 = projectCoordinate(0, 138); let boxL2 = projectCoordinate(165, 138);
+            let boxL3 = projectCoordinate(165, 542); let boxL4 = projectCoordinate(0, 542);
+            ctx.moveTo(boxL1.x, boxL1.y); ctx.lineTo(boxL2.x, boxL2.y); ctx.lineTo(boxL3.x, boxL3.y); ctx.lineTo(boxL4.x, boxL4.y);
+            ctx.stroke();
+
+            // Penalty Box Right
+            ctx.beginPath();
+            let boxR1 = projectCoordinate(pitchWidth, 138); let boxR2 = projectCoordinate(pitchWidth - 165, 138);
+            let boxR3 = projectCoordinate(pitchWidth - 165, 542); let boxR4 = projectCoordinate(pitchWidth, 542);
+            ctx.moveTo(boxR1.x, boxR1.y); ctx.lineTo(boxR2.x, boxR2.y); ctx.lineTo(boxR3.x, boxR3.y); ctx.lineTo(boxR4.x, boxR4.y);
+            ctx.stroke();
         }
 
-        // Master Frame Render Execution Loop
+        function enginePhysicsStep() {
+            if (ball.cooldown > 0) ball.cooldown--;
+
+            // 1. Shift Tactical Shape Blocks Based on Ball Center of Mass
+            players.forEach(p => {
+                let ballBiasX = (ball.x - pitchWidth / 2) * 0.25;
+                let ballBiasY = (ball.y - p.baseHomeY) * 0.2;
+                
+                if (p.role === 'GK') ballBiasX = 0; // Lock keeper logic to line
+
+                p.homeX = p.baseHomeX + ballBiasX;
+                p.homeY = p.baseHomeY + ballBiasY;
+
+                // If chasing a loose ball
+                if (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 220) {
+                    p.x += (ball.x - p.x) * 0.04;
+                    p.y += (ball.y - p.y) * 0.04;
+                } else {
+                    // Return to dynamic tactical formation structure
+                    p.x += (p.homeX - p.x) * 0.025;
+                    p.y += (p.homeY - p.y) * 0.025;
+                }
+
+                // Micro-jitter to mimic organic player direction adjustments
+                p.x += (Math.random() - 0.5) * 0.8;
+                p.y += (Math.random() - 0.5) * 0.8;
+            });
+
+            // 2. Track Referee Positioning Arc
+            referee.targetX = ball.x + (pitchWidth / 2 - ball.x) * 0.2;
+            referee.targetY = ball.y + (ball.y > 340 ? -80 : 80);
+            referee.x += (referee.targetX - referee.x) * 0.03;
+            referee.y += (referee.targetY - referee.y) * 0.03;
+
+            // 3. Ball Possession and Passing Engine
+            if (ball.owner) {
+                ball.x = ball.owner.x;
+                ball.y = ball.owner.y;
+                ball.vx = 0; ball.vy = 0;
+
+                // Automated Tactical Passing Sequence Logic
+                if (Math.random() < 0.015) { 
+                    let teammates = players.filter(p => p.team === ball.owner.team && p.id !== ball.owner.id);
+                    let recipient = teammates[Math.floor(Math.random() * teammates.length)];
+                    
+                    ball.lastOwner = ball.owner;
+                    ball.owner = null;
+                    ball.cooldown = 15; // Frames before passer re-engages
+
+                    let dx = recipient.x - ball.x;
+                    let dy = recipient.y - ball.y;
+                    let dist = Math.hypot(dx, dy);
+                    
+                    // Fire ball along normalized vector target
+                    ball.vx = (dx / dist) * 7.5;
+                    ball.vy = (dy / dist) * 7.5;
+                }
+            } else {
+                // Ball Flight Momentum Step
+                ball.x += ball.vx;
+                ball.y += ball.vy;
+                ball.vx *= 0.98; // Friction damping
+                ball.vy *= 0.98;
+
+                // Boundary Rebound Correction
+                if (ball.x < 0 || ball.x > pitchWidth) ball.vx *= -1;
+                if (ball.y < 0 || ball.y > pitchHeight) ball.vy *= -1;
+
+                // Check Proximity Interceptions
+                let idealGrabber = null;
+                let closestDist = 14; 
+
+                players.forEach(p => {
+                    if (ball.lastOwner && ball.lastOwner.id === p.id && ball.cooldown > 0) return;
+                    
+                    let dist = Math.hypot(ball.x - p.x, ball.y - p.y);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        idealGrabber = p;
+                    }
+                });
+
+                if (idealGrabber) {
+                    ball.owner = idealGrabber;
+                }
+
+                // If momentum dies out completely, force a long ball pass structure
+                if (Math.abs(ball.vx) + Math.abs(ball.vy) < 0.15) {
+                    let randomPlayer = players[Math.floor(Math.random() * players.length)];
+                    ball.owner = randomPlayer;
+                }
+            }
+        }
+
         function renderExecutionPipeline() {
+            enginePhysicsStep();
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-            // 1. Draw Field Setup
+            // 1. Draw Geometric Pitch Background
             drawHighContrastPitch();
 
-            // 2. Update and Draw Flat-Shaded Entities
-            entities.forEach(ent => {
-                // Bounds Collision Check and Vector Step
-                if(ent.type !== 'Ball') {
-                    ent.x += ent.vx; ent.y += ent.vy;
-                    if(ent.x < 0 || ent.x > pitchWidth) ent.vx *= -1;
-                    if(ent.y < 0 || ent.y > pitchHeight) ent.vy *= -1;
-                } else {
-                    ent.x += ent.vx; ent.y += ent.vy;
-                    if(ent.x < 0 || ent.x > pitchWidth) ent.vx *= -1;
-                    if(ent.y < 0 || ent.y > pitchHeight) ent.vy *= -1;
-                    // Friction vector damping
-                    ent.vx *= 0.99; ent.vy *= 0.99;
-                    if(Math.abs(ent.vx) < 0.1) { ent.vx = (Math.random()-0.5)*6; ent.vy = (Math.random()-0.5)*6; }
-                }
+            // 2. Draw Match Official Core Asset
+            let refPos = projectCoordinate(referee.x, referee.y);
+            ctx.fillStyle = colorRef.value;
+            ctx.beginPath(); ctx.arc(refPos.x, refPos.y, 7, 0, Math.PI * 2); ctx.fill();
 
-                // Transform position coordinates
-                let pos = projectCoordinate(ent.x, ent.y);
-
-                // Define flat asset fill configurations based on UI dropdown selections
-                if (ent.type === 'A') {
-                    ctx.fillStyle = colorTeamA.value;
-                    ctx.beginPath(); ctx.arc(pos.x, pos.y, 7, 0, Math.PI * 2); ctx.fill();
-                } else if (ent.type === 'B') {
-                    ctx.fillStyle = colorTeamB.value;
-                    ctx.beginPath(); ctx.arc(pos.x, pos.y, 7, 0, Math.PI * 2); ctx.fill();
-                } else if (ent.type === 'Ref') {
-                    ctx.fillStyle = colorRef.value;
-                    ctx.beginPath(); ctx.arc(pos.x, pos.y, 6, 0, Math.PI * 2); ctx.fill();
-                } else if (ent.type === 'Ball') {
-                    ctx.fillStyle = colorBall.value;
-                    ctx.beginPath(); ctx.arc(pos.x, pos.y, 4, 0, Math.PI * 2); ctx.fill();
-                }
+            // 3. Draw Full-Body Outlined Player Masks
+            players.forEach(p => {
+                let pos = projectCoordinate(p.x, p.y);
+                ctx.fillStyle = (p.team === 'A') ? colorTeamA.value : colorTeamB.value;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 7.5, 0, Math.PI * 2);
+                ctx.fill();
             });
+
+            // 4. Draw Ball Asset
+            let ballPos = projectCoordinate(ball.x, ball.y);
+            ctx.fillStyle = colorBall.value;
+            ctx.beginPath();
+            ctx.arc(ballPos.x, ballPos.y, 4.5, 0, Math.PI * 2);
+            ctx.fill();
 
             requestAnimationFrame(renderExecutionPipeline);
         }
 
-        // Camera Preset Profile Engine Listener
+        // Event Handling Hooks
         cameraPreset.addEventListener('change', (e) => {
-            if (e.target.value === 'coop') {
-                pitchAngleSlider.value = 52;
-            } else if (e.target.value === 'tele') {
-                pitchAngleSlider.value = 34;
-            } else if (e.target.value === 'tactical') {
-                pitchAngleSlider.value = 90;
-            }
+            if (e.target.value === 'coop') pitchAngleSlider.value = 52;
+            else if (e.target.value === 'tele') pitchAngleSlider.value = 34;
+            else if (e.target.value === 'tactical') pitchAngleSlider.value = 90;
             angleValDisplay.textContent = pitchAngleSlider.value + "°";
         });
 
@@ -369,17 +507,19 @@
             cameraPreset.value = "custom";
         });
 
-        // Toggle Clean Screen Isolation Framework via Double-Tap
+        formationASelect.addEventListener('change', buildMatchSquads);
+        formationBSelect.addEventListener('change', buildMatchSquads);
+
         window.addEventListener('dblclick', () => {
             document.body.classList.toggle('sidebar-hidden');
-            setTimeout(resizeCanvasViewport, 50);
+            setTimeout(resizeCanvasViewport, 60);
         });
 
         window.addEventListener('resize', resizeCanvasViewport);
 
-        // Bootstrap Sandbox Pipeline
+        // Core Initialization
         resizeCanvasViewport();
-        initSimulationEntities();
+        buildMatchSquads();
         renderExecutionPipeline();
     </script>
 </body>
