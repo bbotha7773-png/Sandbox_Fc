@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FC Tactical Multi-Phase Sandbox</title>
+    <title>FC Tactical Simulation - Match Engine Sandbox</title>
     <style>
         * {
             box-sizing: border-box;
@@ -83,7 +83,19 @@
         .badge-transition { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
         .badge-attackA { background: rgba(0, 255, 255, 0.15); color: #00ffff; border: 1px solid #00ffff; }
         .badge-attackB { background: rgba(255, 0, 255, 0.15); color: #ff00ff; border: 1px solid #ff00ff; }
+        .badge-goal { background: #238636; color: #ffffff; border: 1px solid #2ea043; animation: pulse 0.5s infinite alternate; }
         
+        #scoreboard {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            font-weight: 700;
+            padding: 8px 12px;
+            background: #21262d;
+            border-radius: 4px;
+            border: 1px solid #30363d;
+        }
+
         #canvas-container {
             flex: 1;
             position: relative;
@@ -104,6 +116,15 @@
         <div>
             <h2>Matrix Controls</h2>
             <p class="instruction">Double-tap the field to clear all UI overlays for pristine data capture.</p>
+        </div>
+
+        <!-- Live Score Tracker -->
+        <div class="control-group">
+            <label>Match Score</label>
+            <div id="scoreboard">
+                <span style="color: #00ffff;" id="scoreA_disp">TEAM A: 0</span>
+                <span style="color: #ff00ff;" id="scoreB_disp">TEAM B: 0</span>
+            </div>
         </div>
 
         <!-- Live Engine Diagnostics -->
@@ -205,6 +226,8 @@
         const colorRef = document.getElementById('colorRef');
         const colorBall = document.getElementById('colorBall');
         const phaseIndicator = document.getElementById('phaseIndicator');
+        const scoreADisp = document.getElementById('scoreA_disp');
+        const scoreBDisp = document.getElementById('scoreB_disp');
 
         const pitchWidth = 1050;
         const pitchHeight = 680;
@@ -213,9 +236,12 @@
         let referee = { x: 525, y: 340, vx: 0, vy: 0, targetX: 525, targetY: 340 };
         let ball = { x: 525, y: 340, vx: 0, vy: 0, owner: null, lastOwner: null, cooldown: 0 };
         
-        // State Vectors
-        let matchPhase = "TRANSITION"; // ATTACK_A, ATTACK_B, TRANSITION
+        // Match Variables
+        let matchPhase = "TRANSITION"; 
         let transitionTimer = 0;
+        let scoreA = 0;
+        let scoreB = 0;
+        let resetTimer = 0; 
 
         const formationTemplates = {
             "442": [
@@ -254,7 +280,7 @@
                 players.push({
                     id: 'A' + index, team: 'A', role: pos.r,
                     x: pos.x, y: pos.y, vx: 0, vy: 0,
-                    baseHomeX: pos.x, baseHomeY: pos.y
+                    baseHomeX: pos.x, baseHomeY: pos.y, tackleCooldown: 0
                 });
             });
 
@@ -263,13 +289,31 @@
                 players.push({
                     id: 'B' + index, team: 'B', role: pos.r,
                     x: mirroredX, y: pos.y, vx: 0, vy: 0,
-                    baseHomeX: mirroredX, baseHomeY: pos.y
+                    baseHomeX: mirroredX, baseHomeY: pos.y, tackleCooldown: 0
                 });
             });
 
+            triggerKickoffReset();
+        }
+
+        function triggerKickoffReset() {
+            players.forEach(p => {
+                p.x = p.baseHomeX;
+                p.y = p.baseHomeY;
+                p.vx = 0; p.vy = 0;
+                p.tackleCooldown = 0;
+            });
+            ball.x = 525; ball.y = 340;
+            ball.vx = 0; ball.vy = 0;
             ball.owner = null; ball.lastOwner = null;
-            ball.x = 525; ball.y = 340; ball.vx = 0; ball.vy = 0;
+            ball.cooldown = 40;
             matchPhase = "TRANSITION";
+            updatePhaseIndicatorUI();
+        }
+
+        function updateScoreboardUI() {
+            scoreADisp.textContent = `TEAM A: ${scoreA}`;
+            scoreBDisp.textContent = `TEAM B: ${scoreB}`;
         }
 
         function projectCoordinate(x, y) {
@@ -299,14 +343,17 @@
 
         function updatePhaseIndicatorUI() {
             phaseIndicator.className = "phase-badge";
-            if (matchPhase === "TRANSITION") {
+            if (resetTimer > 0) {
+                phaseIndicator.textContent = "GOAL SCORED! RESETTING...";
+                phaseIndicator.classList.add("badge-goal");
+            } else if (matchPhase === "TRANSITION") {
                 phaseIndicator.textContent = "Transition State";
                 phaseIndicator.classList.add("badge-transition");
             } else if (matchPhase === "ATTACK_A") {
-                phaseIndicator.textContent = "Team A Attacking Shape";
+                phaseIndicator.textContent = "Team A Attacking";
                 phaseIndicator.classList.add("badge-attackA");
             } else if (matchPhase === "ATTACK_B") {
-                phaseIndicator.textContent = "Team B Attacking Shape";
+                phaseIndicator.textContent = "Team B Attacking";
                 phaseIndicator.classList.add("badge-attackB");
             }
         }
@@ -360,19 +407,81 @@
             let boxR3 = projectCoordinate(pitchWidth - 165, 542); let boxR4 = projectCoordinate(pitchWidth, 542);
             ctx.moveTo(boxR1.x, boxR1.y); ctx.lineTo(boxR2.x, boxR2.y); ctx.lineTo(boxR3.x, boxR3.y); ctx.lineTo(boxR4.x, boxR4.y);
             ctx.stroke();
+
+            // Visual Goal Net Formations (High Contrast Red Outline)
+            ctx.strokeStyle = '#ff3333';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            let lg1 = projectCoordinate(0, 290); let lg2 = projectCoordinate(-25, 290);
+            let lg3 = projectCoordinate(-25, 390); let lg4 = projectCoordinate(0, 390);
+            ctx.moveTo(lg1.x, lg1.y); ctx.lineTo(lg2.x, lg2.y); ctx.lineTo(lg3.x, lg3.y); ctx.lineTo(lg4.x, lg4.y);
+            ctx.stroke();
+
+            ctx.beginPath();
+            let rg1 = projectCoordinate(pitchWidth, 290); let rg2 = projectCoordinate(pitchWidth + 25, 290);
+            let rg3 = projectCoordinate(pitchWidth + 25, 390); let rg4 = projectCoordinate(pitchWidth, 390);
+            ctx.moveTo(rg1.x, rg1.y); ctx.lineTo(rg2.x, rg2.y); ctx.lineTo(rg3.x, rg3.y); ctx.lineTo(rg4.x, rg4.y);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)'; // Revert trace
         }
 
         function enginePhysicsStep() {
+            // Match Clock Freeze Framework for Goal Scoring Resets
+            if (resetTimer > 0) {
+                resetTimer--;
+                if (resetTimer === 0) {
+                    triggerKickoffReset();
+                    updateScoreboardUI();
+                }
+                return; 
+            }
+
             if (ball.cooldown > 0) ball.cooldown--;
             if (transitionTimer > 0) {
                 transitionTimer--;
-                if (transitionTimer === 0 && !ball.owner) {
-                    // Fallback calculation rule
-                    matchPhase = "TRANSITION";
-                }
+                if (transitionTimer === 0 && !ball.owner) matchPhase = "TRANSITION";
             }
 
-            // 1. Process Strategic Geometry Modifications Based on Match Phase State
+            // 1. Process 40% Defending Tackle Engine Matrices
+            if (ball.owner) {
+                let carrier = ball.owner;
+                players.forEach(p => {
+                    if (p.tackleCooldown > 0) p.tackleCooldown--;
+
+                    if (p.team !== carrier.team && p.role !== 'GK') {
+                        let dist = Math.hypot(carrier.x - p.x, carrier.y - p.y);
+                        
+                        // Interaction tackling aperture threshold
+                        if (dist < 18 && p.tackleCooldown === 0) {
+                            p.tackleCooldown = 35; // Apply challenge internal frequency lock
+
+                            if (Math.random() < 0.40) { // 40% Tackle Success Rate Calibration
+                                ball.owner = null;
+                                ball.lastOwner = carrier;
+                                ball.cooldown = 15;
+
+                                // Detach ball with organic velocity calculations
+                                let angle = Math.random() * Math.PI * 2;
+                                ball.vx = Math.cos(angle) * 3.2;
+                                ball.vy = Math.sin(angle) * 3.2;
+
+                                matchPhase = "TRANSITION";
+                                transitionTimer = 40;
+                                updatePhaseIndicatorUI();
+                            } else {
+                                // Tackle Failed: Defender suffers physics momentum drag/stagger
+                                p.vx *= -0.4;
+                                p.vy *= -0.4;
+                            }
+                        }
+                    }
+                });
+            } else {
+                // Decay tracking lock cooldowns if ball is loose
+                players.forEach(p => { if (p.tackleCooldown > 0) p.tackleCooldown--; });
+            }
+
+            // 2. Kinematic Velocity Steps & Positional Updates
             players.forEach(p => {
                 let phaseX = p.baseHomeX;
                 let phaseY = p.baseHomeY;
@@ -380,42 +489,36 @@
                 if (p.role !== 'GK') {
                     if (matchPhase === "ATTACK_A") {
                         if (p.team === 'A') {
-                            // Team A Expands: Push forward right (+X), stretch wide vertically away from center row (340)
-                            phaseX = p.baseHomeX + 110;
+                            phaseX = p.baseHomeX + 115;
                             phaseY = 340 + (p.baseHomeY - 340) * 1.35;
                         } else {
-                            // Team B Compresses into Low Block: Drop deep right (+X), squeeze narrow toward center line
                             phaseX = p.baseHomeX + 90; 
                             phaseY = 340 + (p.baseHomeY - 340) * 0.65;
                         }
                     } else if (matchPhase === "ATTACK_B") {
                         if (p.team === 'B') {
-                            // Team B Expands: Flood forward left (-X), stretch wide vertically
-                            phaseX = p.baseHomeX - 110;
+                            phaseX = p.baseHomeX - 115;
                             phaseY = 340 + (p.baseHomeY - 340) * 1.35;
                         } else {
-                            // Team A Compresses into Low Block: Fall back left (-X), pinch structural lines narrow
                             phaseX = p.baseHomeX - 90;
                             phaseY = 340 + (p.baseHomeY - 340) * 0.65;
                         }
                     }
                 }
 
-                // Append local ball-tracking magnet focus to core coordinate vectors
-                let ballBiasX = (ball.x - pitchWidth / 2) * 0.2;
-                let ballBiasY = (ball.y - phaseY) * 0.12;
+                let ballBiasX = (ball.x - pitchWidth / 2) * 0.22;
+                let ballBiasY = (ball.y - phaseY) * 0.14;
 
                 let targetX, targetY;
                 if (p.role === 'GK') {
                     targetX = p.baseHomeX;
-                    targetY = p.baseHomeY + (ball.y - 340) * 0.15;
+                    targetY = p.baseHomeY + (ball.y - 340) * 0.18;
                 } else {
                     targetX = phaseX + ballBiasX;
                     targetY = phaseY + ballBiasY;
                 }
 
-                // Overwrite target tracking if chasing loose tracking assets close by
-                if (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 180) {
+                if (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 190) {
                     targetX = ball.x;
                     targetY = ball.y;
                 }
@@ -425,14 +528,12 @@
                 let dist = Math.hypot(dx, dy);
 
                 if (dist > 2) {
-                    // Accumulate inertial updates smoothly
-                    p.vx += (dx / dist) * 0.07;
-                    p.vy += (dy / dist) * 0.07;
+                    p.vx += (dx / dist) * 0.075;
+                    p.vy += (dy / dist) * 0.075;
                 }
 
-                // Kinematic Caps: Dynamic sprint allocation during transitions vs containment blocks
-                let baseCap = (matchPhase === "TRANSITION") ? 1.6 : 1.2;
-                let maxSpeed = (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 180) ? 2.3 : baseCap;
+                let baseCap = (matchPhase === "TRANSITION") ? 1.5 : 1.15;
+                let maxSpeed = (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 190) ? 2.2 : baseCap;
                 
                 let currentSpeed = Math.hypot(p.vx, p.vy);
                 if (currentSpeed > maxSpeed) {
@@ -440,36 +541,57 @@
                     p.vy = (p.vy / currentSpeed) * maxSpeed;
                 }
 
-                // Step Position and Apply Friction
                 p.x += p.vx; p.y += p.vy;
                 p.vx *= 0.88; p.vy *= 0.88;
 
-                // Restrict asset coordinate limits inside white boundary lines
-                p.x = Math.max(25, Math.min(pitchWidth - 25, p.x));
-                p.y = Math.max(25, Math.min(pitchHeight - 25, p.y));
+                p.x = Math.max(20, Math.min(pitchWidth - 20, p.x));
+                p.y = Math.max(20, Math.min(pitchHeight - 20, p.y));
             });
 
-            // 2. Heavy Ball Dynamics Matrix
+            // 3. Heavy Ball Friction Logic & Attacking Shot Selections
             if (ball.owner) {
                 ball.x = ball.owner.x;
                 ball.y = ball.owner.y;
                 ball.vx = 0; ball.vy = 0;
 
-                // Pass sequence selector triggers
-                if (Math.random() < 0.012) { 
-                    let teammates = players.filter(p => p.team === ball.owner.team && p.id !== ball.owner.id);
-                    let recipient = teammates[Math.floor(Math.random() * teammates.length)];
-                    
-                    ball.lastOwner = ball.owner;
-                    ball.owner = null;
-                    ball.cooldown = 25;
+                if (Math.random() < 0.015) { 
+                    let carrier = ball.owner;
+                    let executionShot = false;
 
-                    let dx = recipient.x - ball.x;
-                    let dy = recipient.y - ball.y;
-                    let dist = Math.hypot(dx, dy);
-                    
-                    ball.vx = (dx / dist) * 5.4;
-                    ball.vy = (dy / dist) * 5.4;
+                    // Attacking Shot Vector Logic: Evaluate coordinates inside final third box
+                    if (carrier.team === 'A' && carrier.x > 780) {
+                        ball.lastOwner = carrier; ball.owner = null; ball.cooldown = 30;
+                        let gDx = pitchWidth - ball.x;
+                        let gDy = 340 - ball.y;
+                        let gDist = Math.hypot(gDx, gDy);
+                        ball.vx = (gDx / gDist) * 6.8; 
+                        ball.vy = (gDy / gDist) * 6.8;
+                        executionShot = true;
+                    } else if (carrier.team === 'B' && carrier.x < 270) {
+                        ball.lastOwner = carrier; ball.owner = null; ball.cooldown = 30;
+                        let gDx = 0 - ball.x;
+                        let gDy = 340 - ball.y;
+                        let gDist = Math.hypot(gDx, gDy);
+                        ball.vx = (gDx / gDist) * 6.8;
+                        ball.vy = (gDy / gDist) * 6.8;
+                        executionShot = true;
+                    }
+
+                    // Standard Passing Play Sequence if shot execution context doesn't meet parameters
+                    if (!executionShot) {
+                        let teammates = players.filter(p => p.team === carrier.team && p.id !== carrier.id);
+                        let recipient = teammates[Math.floor(Math.random() * teammates.length)];
+                        
+                        ball.lastOwner = carrier; ball.owner = null; ball.cooldown = 25;
+                        let dx = recipient.x - ball.x;
+                        let dy = recipient.y - ball.y;
+                        let dist = Math.hypot(dx, dy);
+                        
+                        ball.vx = (dx / dist) * 5.3;
+                        ball.vy = (dy / dist) * 5.3;
+                    }
+                    matchPhase = "TRANSITION";
+                    updatePhaseIndicatorUI();
                 }
             } else {
                 ball.x += ball.vx;
@@ -477,7 +599,23 @@
                 ball.vx *= 0.965; 
                 ball.vy *= 0.965;
 
-                if (ball.x < 0 || ball.x > pitchWidth) ball.vx *= -1;
+                // Match Goal Calculation Framework
+                if (ball.x <= 0) {
+                    if (ball.y >= 290 && ball.y <= 390) {
+                        scoreB++; resetTimer = 80; ball.vx = 0; ball.vy = 0;
+                        updatePhaseIndicatorUI(); return;
+                    } else {
+                        ball.x = 0; ball.vx *= -1;
+                    }
+                }
+                if (ball.x >= pitchWidth) {
+                    if (ball.y >= 290 && ball.y <= 390) {
+                        scoreA++; resetTimer = 80; ball.vx = 0; ball.vy = 0;
+                        updatePhaseIndicatorUI(); return;
+                    } else {
+                        ball.x = pitchWidth; ball.vx *= -1;
+                    }
+                }
                 if (ball.y < 0 || ball.y > pitchHeight) ball.vy *= -1;
 
                 let idealGrabber = null;
@@ -496,17 +634,14 @@
                     let oldTeam = ball.lastOwner ? ball.lastOwner.team : null;
                     ball.owner = idealGrabber;
                     
-                    // Tactical Event Engine: Determine if turnover or structural continuation occurred
                     if (oldTeam && oldTeam !== ball.owner.team) {
-                        matchPhase = "TRANSITION";
-                        transitionTimer = 45; // Hold system in high-intensity sprint before establishing block shapes
+                        matchPhase = "TRANSITION"; transitionTimer = 45;
                     } else if (transitionTimer === 0) {
                         matchPhase = (ball.owner.team === 'A') ? "ATTACK_A" : "ATTACK_B";
                     }
                     updatePhaseIndicatorUI();
                 }
 
-                // Re-center ball on dead stop parameters
                 if (Math.abs(ball.vx) + Math.abs(ball.vy) < 0.12) {
                     let randomPlayer = players[Math.floor(Math.random() * players.length)];
                     ball.owner = randomPlayer;
@@ -517,7 +652,7 @@
                 }
             }
 
-            // 3. Official Trajectory Vector
+            // 4. Official Trajectory Profile Tracking
             referee.targetX = ball.x + (pitchWidth / 2 - ball.x) * 0.25;
             referee.targetY = ball.y + (ball.y > 340 ? -100 : 100);
             let rDx = referee.targetX - referee.x;
@@ -558,7 +693,9 @@
         });
 
         formationASelect.addEventListener('change', buildMatchSquads);
-        formationBSelect.addEventListener('change', buildMatchSquads);
+        formationBSelect.addEventListener('change', buildFormationB);
+        function buildFormationB() { buildMatchSquads(); }
+
         window.addEventListener('dblclick', () => {
             document.body.classList.toggle('sidebar-hidden');
             setTimeout(resizeCanvasViewport, 60);
@@ -567,6 +704,7 @@
 
         resizeCanvasViewport();
         buildMatchSquads();
+        updateScoreboardUI();
         renderExecutionPipeline();
     </script>
 </body>
