@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FC High-Contrast Tactical Simulation Sandbox</title>
+    <title>FC Tactical Multi-Phase Sandbox</title>
     <style>
         * {
             box-sizing: border-box;
@@ -71,6 +71,19 @@
             font-size: 12px;
             outline: none;
         }
+        .phase-badge {
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .badge-transition { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+        .badge-attackA { background: rgba(0, 255, 255, 0.15); color: #00ffff; border: 1px solid #00ffff; }
+        .badge-attackB { background: rgba(255, 0, 255, 0.15); color: #ff00ff; border: 1px solid #ff00ff; }
+        
         #canvas-container {
             flex: 1;
             position: relative;
@@ -93,6 +106,13 @@
             <p class="instruction">Double-tap the field to clear all UI overlays for pristine data capture.</p>
         </div>
 
+        <!-- Live Engine Diagnostics -->
+        <div class="control-group">
+            <label>Live Tactical State</label>
+            <div id="phaseIndicator" class="phase-badge badge-transition">Transition Phase</div>
+        </div>
+
+        <!-- Camera Profile Controllers -->
         <div class="control-group">
             <label>Camera Perspective Profile</label>
             <select id="cameraPreset">
@@ -105,6 +125,7 @@
             </div>
         </div>
 
+        <!-- Team Formations System -->
         <div class="control-group">
             <label>Team A Tactical Bloc</label>
             <select id="formationA">
@@ -125,6 +146,7 @@
             </select>
         </div>
 
+        <!-- Asset Color Selection System -->
         <div class="control-group">
             <label>Team A Mask</label>
             <select id="colorTeamA">
@@ -182,6 +204,7 @@
         const colorTeamB = document.getElementById('colorTeamB');
         const colorRef = document.getElementById('colorRef');
         const colorBall = document.getElementById('colorBall');
+        const phaseIndicator = document.getElementById('phaseIndicator');
 
         const pitchWidth = 1050;
         const pitchHeight = 680;
@@ -190,8 +213,9 @@
         let referee = { x: 525, y: 340, vx: 0, vy: 0, targetX: 525, targetY: 340 };
         let ball = { x: 525, y: 340, vx: 0, vy: 0, owner: null, lastOwner: null, cooldown: 0 };
         
-        // Global Match Context (Prepped for step 2)
+        // State Vectors
         let matchPhase = "TRANSITION"; // ATTACK_A, ATTACK_B, TRANSITION
+        let transitionTimer = 0;
 
         const formationTemplates = {
             "442": [
@@ -230,7 +254,6 @@
                 players.push({
                     id: 'A' + index, team: 'A', role: pos.r,
                     x: pos.x, y: pos.y, vx: 0, vy: 0,
-                    homeX: pos.x, homeY: pos.y,
                     baseHomeX: pos.x, baseHomeY: pos.y
                 });
             });
@@ -240,13 +263,13 @@
                 players.push({
                     id: 'B' + index, team: 'B', role: pos.r,
                     x: mirroredX, y: pos.y, vx: 0, vy: 0,
-                    homeX: mirroredX, homeY: pos.y,
                     baseHomeX: mirroredX, baseHomeY: pos.y
                 });
             });
 
             ball.owner = null; ball.lastOwner = null;
             ball.x = 525; ball.y = 340; ball.vx = 0; ball.vy = 0;
+            matchPhase = "TRANSITION";
         }
 
         function projectCoordinate(x, y) {
@@ -272,6 +295,20 @@
                 w = h * aspect;
             }
             canvas.width = w; canvas.height = h;
+        }
+
+        function updatePhaseIndicatorUI() {
+            phaseIndicator.className = "phase-badge";
+            if (matchPhase === "TRANSITION") {
+                phaseIndicator.textContent = "Transition State";
+                phaseIndicator.classList.add("badge-transition");
+            } else if (matchPhase === "ATTACK_A") {
+                phaseIndicator.textContent = "Team A Attacking Shape";
+                phaseIndicator.classList.add("badge-attackA");
+            } else if (matchPhase === "ATTACK_B") {
+                phaseIndicator.textContent = "Team B Attacking Shape";
+                phaseIndicator.classList.add("badge-attackB");
+            }
         }
 
         function drawHighContrastPitch() {
@@ -311,7 +348,7 @@
             }
             ctx.stroke();
 
-            // Penalty Areas
+            // Penalty Boxes
             ctx.beginPath();
             let boxL1 = projectCoordinate(0, 138); let boxL2 = projectCoordinate(165, 138);
             let boxL3 = projectCoordinate(165, 542); let boxL4 = projectCoordinate(0, 542);
@@ -327,15 +364,57 @@
 
         function enginePhysicsStep() {
             if (ball.cooldown > 0) ball.cooldown--;
+            if (transitionTimer > 0) {
+                transitionTimer--;
+                if (transitionTimer === 0 && !ball.owner) {
+                    // Fallback calculation rule
+                    matchPhase = "TRANSITION";
+                }
+            }
 
-            // 1. Calculate Calibrated Player Movement with Weighted Kinematics
+            // 1. Process Strategic Geometry Modifications Based on Match Phase State
             players.forEach(p => {
-                let targetX = p.baseHomeX + (ball.x - pitchWidth / 2) * 0.22;
-                let targetY = p.baseHomeY + (ball.y - p.baseHomeY) * 0.15;
-                
-                if (p.role === 'GK') targetX = p.baseHomeX;
+                let phaseX = p.baseHomeX;
+                let phaseY = p.baseHomeY;
 
-                // Loose Ball Scramble Matrix
+                if (p.role !== 'GK') {
+                    if (matchPhase === "ATTACK_A") {
+                        if (p.team === 'A') {
+                            // Team A Expands: Push forward right (+X), stretch wide vertically away from center row (340)
+                            phaseX = p.baseHomeX + 110;
+                            phaseY = 340 + (p.baseHomeY - 340) * 1.35;
+                        } else {
+                            // Team B Compresses into Low Block: Drop deep right (+X), squeeze narrow toward center line
+                            phaseX = p.baseHomeX + 90; 
+                            phaseY = 340 + (p.baseHomeY - 340) * 0.65;
+                        }
+                    } else if (matchPhase === "ATTACK_B") {
+                        if (p.team === 'B') {
+                            // Team B Expands: Flood forward left (-X), stretch wide vertically
+                            phaseX = p.baseHomeX - 110;
+                            phaseY = 340 + (p.baseHomeY - 340) * 1.35;
+                        } else {
+                            // Team A Compresses into Low Block: Fall back left (-X), pinch structural lines narrow
+                            phaseX = p.baseHomeX - 90;
+                            phaseY = 340 + (p.baseHomeY - 340) * 0.65;
+                        }
+                    }
+                }
+
+                // Append local ball-tracking magnet focus to core coordinate vectors
+                let ballBiasX = (ball.x - pitchWidth / 2) * 0.2;
+                let ballBiasY = (ball.y - phaseY) * 0.12;
+
+                let targetX, targetY;
+                if (p.role === 'GK') {
+                    targetX = p.baseHomeX;
+                    targetY = p.baseHomeY + (ball.y - 340) * 0.15;
+                } else {
+                    targetX = phaseX + ballBiasX;
+                    targetY = phaseY + ballBiasY;
+                }
+
+                // Overwrite target tracking if chasing loose tracking assets close by
                 if (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 180) {
                     targetX = ball.x;
                     targetY = ball.y;
@@ -346,56 +425,55 @@
                 let dist = Math.hypot(dx, dy);
 
                 if (dist > 2) {
-                    // Gradual accumulation of velocity vectors (Inertia)
-                    p.vx += (dx / dist) * 0.08;
-                    p.vy += (dy / dist) * 0.08;
+                    // Accumulate inertial updates smoothly
+                    p.vx += (dx / dist) * 0.07;
+                    p.vy += (dy / dist) * 0.07;
                 }
 
-                // Apply Strict Maximum Human Speed Caps
-                let maxSpeed = (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 180) ? 2.2 : 1.3;
+                // Kinematic Caps: Dynamic sprint allocation during transitions vs containment blocks
+                let baseCap = (matchPhase === "TRANSITION") ? 1.6 : 1.2;
+                let maxSpeed = (!ball.owner && Math.hypot(ball.x - p.x, ball.y - p.y) < 180) ? 2.3 : baseCap;
+                
                 let currentSpeed = Math.hypot(p.vx, p.vy);
                 if (currentSpeed > maxSpeed) {
                     p.vx = (p.vx / currentSpeed) * maxSpeed;
                     p.vy = (p.vy / currentSpeed) * maxSpeed;
                 }
 
-                // Apply Ground Drag Friction
+                // Step Position and Apply Friction
                 p.x += p.vx; p.y += p.vy;
                 p.vx *= 0.88; p.vy *= 0.88;
 
-                // Organic micro-adjustments
-                p.x += (Math.random() - 0.5) * 0.2;
-                p.y += (Math.random() - 0.5) * 0.2;
+                // Restrict asset coordinate limits inside white boundary lines
+                p.x = Math.max(25, Math.min(pitchWidth - 25, p.x));
+                p.y = Math.max(25, Math.min(pitchHeight - 25, p.y));
             });
 
-            // 2. Heavy Friction Ball Dynamics
+            // 2. Heavy Ball Dynamics Matrix
             if (ball.owner) {
                 ball.x = ball.owner.x;
                 ball.y = ball.owner.y;
                 ball.vx = 0; ball.vy = 0;
 
-                // Regulated passing cadence
+                // Pass sequence selector triggers
                 if (Math.random() < 0.012) { 
                     let teammates = players.filter(p => p.team === ball.owner.team && p.id !== ball.owner.id);
                     let recipient = teammates[Math.floor(Math.random() * teammates.length)];
                     
                     ball.lastOwner = ball.owner;
                     ball.owner = null;
-                    ball.cooldown = 20;
+                    ball.cooldown = 25;
 
                     let dx = recipient.x - ball.x;
                     let dy = recipient.y - ball.y;
                     let dist = Math.hypot(dx, dy);
                     
-                    // Slower initial velocity vector
-                    ball.vx = (dx / dist) * 5.2;
-                    ball.vy = (dy / dist) * 5.2;
+                    ball.vx = (dx / dist) * 5.4;
+                    ball.vy = (dy / dist) * 5.4;
                 }
             } else {
                 ball.x += ball.vx;
                 ball.y += ball.vy;
-                
-                // Enhanced Drag Coefficient (slowing down the rolling speed)
                 ball.vx *= 0.965; 
                 ball.vy *= 0.965;
 
@@ -403,7 +481,7 @@
                 if (ball.y < 0 || ball.y > pitchHeight) ball.vy *= -1;
 
                 let idealGrabber = null;
-                let closestDist = 12; // Precise interaction radius
+                let closestDist = 12;
 
                 players.forEach(p => {
                     if (ball.lastOwner && ball.lastOwner.id === p.id && ball.cooldown > 0) return;
@@ -415,18 +493,31 @@
                 });
 
                 if (idealGrabber) {
+                    let oldTeam = ball.lastOwner ? ball.lastOwner.team : null;
                     ball.owner = idealGrabber;
-                    matchPhase = (ball.owner.team === 'A') ? "ATTACK_A" : "ATTACK_B";
+                    
+                    // Tactical Event Engine: Determine if turnover or structural continuation occurred
+                    if (oldTeam && oldTeam !== ball.owner.team) {
+                        matchPhase = "TRANSITION";
+                        transitionTimer = 45; // Hold system in high-intensity sprint before establishing block shapes
+                    } else if (transitionTimer === 0) {
+                        matchPhase = (ball.owner.team === 'A') ? "ATTACK_A" : "ATTACK_B";
+                    }
+                    updatePhaseIndicatorUI();
                 }
 
+                // Re-center ball on dead stop parameters
                 if (Math.abs(ball.vx) + Math.abs(ball.vy) < 0.12) {
                     let randomPlayer = players[Math.floor(Math.random() * players.length)];
                     ball.owner = randomPlayer;
-                    matchPhase = (ball.owner.team === 'A') ? "ATTACK_A" : "ATTACK_B";
+                    if (transitionTimer === 0) {
+                        matchPhase = (ball.owner.team === 'A') ? "ATTACK_A" : "ATTACK_B";
+                    }
+                    updatePhaseIndicatorUI();
                 }
             }
 
-            // 3. Match Official Track
+            // 3. Official Trajectory Vector
             referee.targetX = ball.x + (pitchWidth / 2 - ball.x) * 0.25;
             referee.targetY = ball.y + (ball.y > 340 ? -100 : 100);
             let rDx = referee.targetX - referee.x;
