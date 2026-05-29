@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>FC Tactical Broadcast Sandbox - Unified CV Workspace</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0c0f12;
+            display: flex;
+            height: 100vh;
+            font-family: monospace;
+            overflow: hidden;
+            color: #fff;
+            position: relative;
+        }
+
+        /* --- SLIDING CONTROL PANEL --- */
+        #controlDock {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 300px;
+            height: 100%;
+            background: #12161a;
+            border-right: 2px solid #1f272e;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 100;
+            overflow-y: auto;
+            transform: translateX(0);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        #controlDock.hidden {
+            transform: translateX(-100%);
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        label {
+            color: #8a99a6;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .slider-val {
+            color: #00e5ff;
+            float: right;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: #00e5ff;
+            background: #1f272e;
+            height: 6px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .btn-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        button {
+            flex: 1;
+            background: #1f272e;
+            border: 1px solid #3a444d;
+            color: #fff;
+            padding: 10px;
+            font-family: monospace;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        button:active {
+            background: #00e5ff;
+            color: #0c0f12;
+        }
+
+        /* --- MASTER TOGGLE TRIGGER BUTTON --- */
+        #uiToggleBtn {
+            position: absolute;
+            bottom: 20px;
+            left: 320px; /* Aligned next to panel width by default */
+            z-index: 101;
+            background: #1f272e;
+            border: 1px solid #3a444d;
+            color: #00e5ff;
+            padding: 10px 16px;
+            font-family: monospace;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.6);
+            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s, background 0.2s;
+        }
+
+        /* Absolute visibility purge class for clean automated screen-captures */
+        .pristine-capture-mode {
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
+        /* --- VISUALIZER VIEWPORT HUB --- */
+        #viewport {
+            flex: 1;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            z-index: 10;
+        }
+
+        canvas {
+            border: 2px solid #222;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+            background-color: #12161a;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        #telemetryOverlay {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background: rgba(12, 15, 18, 0.85);
+            border: 1px solid #3a444d;
+            border-radius: 4px;
+            padding: 12px;
+            color: #00e5ff;
+            font-size: 11px;
+            pointer-events: none;
+            max-height: 220px;
+            overflow-y: auto;
+            width: 250px;
+            transition: opacity 0.2s;
+        }
+    </style>
+</head>
+<body>
+
+    <button id="uiToggleBtn" onclick="toggleSidebar()">CLOSE</button>
+
+    <div id="controlDock">
+        <h3 style="margin-top:0; border-bottom: 1px solid #1f272e; padding-bottom: 10px; color: #00e5ff; font-size: 14px;">
+            ENGINE CONTROLS
+            <span style="font-size: 9px; color: #8a99a6; display: block; margin-top: 4px; font-weight: normal; text-transform: none;">Double-tap canvas to isolate frames</span>
+        </h3>
+        
+        <div class="control-group">
+            <label>Transmission Speed <span id="speedVal" class="slider-val">4.5</span></label>
+            <input type="range" id="speedSlider" min="1.0" max="15.0" step="0.5" value="4.5">
+        </div>
+
+        <div class="control-group">
+            <label>Decision Latency (Frames) <span id="delayVal" class="slider-val">60</span></label>
+            <input type="range" id="delaySlider" min="10" max="150" step="5" value="60">
+        </div>
+
+        <div class="control-group">
+            <label>Projection FOV <span id="fovVal" class="slider-val">650</span></label>
+            <input type="range" id="fovSlider" min="400" max="1000" step="25" value="650">
+        </div>
+
+        <div class="control-group">
+            <label>Shift Target Profiles</label>
+            <div class="btn-row">
+                <button onclick="changeTeamColor('A', '#ffaa00')">A: Yellow</button>
+                <button onclick="changeTeamColor('B', '#ff00ff')">B: Magenta</button>
+            </div>
+            <div class="btn-row" style="margin-top: 5px;">
+                <button onclick="resetColors()">Reset Matrix</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="viewport">
+        <canvas id="fieldCanvas" width="1000" height="600"></canvas>
+        <div id="telemetryOverlay">📡 Initializing CV Target Buffer...</div>
+    </div>
+
+<script>
+const canvas = document.getElementById('fieldCanvas');
+const ctx = canvas.getContext('2d');
+const telemetryElement = document.getElementById('telemetryOverlay');
+
+// --- CONFIGURATION ---
+const COLORS = {
+    fieldDark: '#3b444b',    
+    fieldLight: '#434c53',   
+    lines: 'rgba(255, 255, 255, 0.6)', // High-contrast regulation lines for feature extraction
+    teamA: '#ff3366',       
+    teamB: '#00e5ff',       
+    jerseyAccent: '#ffffff',
+    ball: '#ffffff',
+    ballPattern: '#111111'
+};
+
+// --- PITCH MATRIX CONSTANTS ---
+const GRID = {
+    macroX: 18, 
+    macroY: 6,  
+    subX: 9,
+    subY: 6
+};
+
+// --- PERSPECTIVE CAMERA ENGINE ---
+const FIELD_VIRTUAL_WIDTH = 1200;
+const FIELD_VIRTUAL_LENGTH = 700;
+
+const CAMERA = {
+    y: 850,       
+    z: 1350,      
+    fov: 650,
+    lookAtX: FIELD_VIRTUAL_WIDTH / 2 
+};
+
+function project(virtualX, virtualZ, virtualY = 0) {
+    const screenCenterX = canvas.width / 2;
+    const distance = CAMERA.z - virtualZ;
+    const scale = CAMERA.fov / Math.max(1, distance);
+    
+    return {
+        x: screenCenterX + (virtualX - CAMERA.lookAtX) * scale,
+        y: (canvas.height * -0.38) + (CAMERA.y * scale) - (virtualY * scale), 
+        scale: scale 
+    };
+}
+
+// --- SPATIAL COORDS MATRIX INVERSION ---
+function getSpatialSector(worldX, worldZ) {
+    const clampedX = Math.max(0, Math.min(worldX, FIELD_VIRTUAL_WIDTH));
+    const clampedZ = Math.max(0, Math.min(worldZ, FIELD_VIRTUAL_LENGTH));
+
+    const pctX = clampedX / FIELD_VIRTUAL_WIDTH;
+    const pctZ = clampedZ / FIELD_VIRTUAL_LENGTH;
+
+    const colIndex = Math.min(Math.floor(pctX * GRID.macroX), GRID.macroX - 1);
+    const rowIndex = Math.min(Math.floor(pctZ * GRID.macroY), GRID.macroY - 1);
+
+    const colLetter = String.fromCharCode(65 + colIndex); 
+    const rowNum = rowIndex + 1;
+
+    const localPctX = (pctX * GRID.macroX) - colIndex;
+    const localPctZ = (pctZ * GRID.macroY) - rowIndex;
+
+    const subGridX = Math.min(Math.floor(localPctX * GRID.subX), GRID.subX - 1);
+    const subGridZ = Math.min(Math.floor(localPctZ * GRID.subY), GRID.subY - 1);
+
+    const metricX = Number(((pctX * 105) - 52.5).toFixed(2));
+    const metricY = Number(((pctZ * 68) - 34.0).toFixed(2));
+
+    return {
+        sector: `${colLetter}${rowNum}`,
+        subCell: `(${subGridX},${subGridZ})`,
+        metrics: [metricX, metricY]
+    };
+}
+
+// --- FORMATION DEFINITIONS ---
+const FORMATIONS = {
+    "442": [
+        {x: 0.05, z: 0.5, role: 'gk'},  
+        {x: 0.25, z: 0.2, role: 'outfield'}, {x: 0.25, z: 0.4, role: 'outfield'}, {x: 0.25, z: 0.6, role: 'outfield'}, {x: 0.25, z: 0.8, role: 'outfield'}, 
+        {x: 0.55, z: 0.2, role: 'outfield'}, {x: 0.55, z: 0.4, role: 'outfield'}, {x: 0.55, z: 0.6, role: 'outfield'}, {x: 0.55, z: 0.8, role: 'outfield'}, 
+        {x: 0.85, z: 0.35, role: 'outfield'}, {x: 0.85, z: 0.65, role: 'outfield'} 
+    ],
+    "433": [
+        {x: 0.05, z: 0.5, role: 'gk'},  
+        {x: 0.25, z: 0.2, role: 'outfield'}, {x: 0.25, z: 0.4, role: 'outfield'}, {x: 0.25, z: 0.6, role: 'outfield'}, {x: 0.25, z: 0.8, role: 'outfield'}, 
+        {x: 0.55, z: 0.3, role: 'outfield'}, {x: 0.55, z: 0.5, role: 'outfield'}, {x: 0.55, z: 0.7, role: 'outfield'}, 
+        {x: 0.85, z: 0.2, role: 'outfield'}, {x: 0.85, z: 0.5, role: 'outfield'}, {x: 0.85, z: 0.8, role: 'outfield'}  
+    ]
+};
+
+const players = [];
+
+function buildTeam(formationKey, color, side, teamId) {
+    const layout = FORMATIONS[formationKey];
+    
+    layout.forEach((pos, idx) => {
+        let worldX = side === 'left' ? pos.x * (FIELD_VIRTUAL_WIDTH / 2) : FIELD_VIRTUAL_WIDTH - (pos.x * (FIELD_VIRTUAL_WIDTH / 2));
+        let worldZ = pos.z * FIELD_VIRTUAL_LENGTH;
+
+        players.push({
+            id: teamId + '_' + (idx + 1),
+            number: idx + 1,
+            team: teamId,
+            role: pos.role,
+            worldX: worldX,
+            worldZ: worldZ,
+            homeX: worldX,  
+            homeZ: worldZ,  
+            color: color,
+            seed: Math.random() * 100 
+        });
+    });
+}
+
+buildTeam("442", COLORS.teamA, 'left', 'A');
+buildTeam("433", COLORS.teamB, 'right', 'B');
+
+// --- BALL SYSTEM ---
+const ball = {
+    worldX: FIELD_VIRTUAL_WIDTH / 2,
+    worldY: 0, 
+    worldZ: FIELD_VIRTUAL_LENGTH / 2,
+    startX: FIELD_VIRTUAL_WIDTH / 2,
+    startZ: FIELD_VIRTUAL_LENGTH / 2,
+    targetX: FIELD_VIRTUAL_WIDTH / 2,
+    targetZ: FIELD_VIRTUAL_LENGTH / 2,
+    holder: null,       
+    state: 'passing',   
+    speed: 4.5,         
+    totalDistance: 0,   
+    currentDistance: 0, 
+    passCounter: 0      
+};
+
+function findPassTarget() {
+    if (!ball.holder) return;
+    
+    const currentHolder = ball.holder;
+    ball.startX = ball.worldX;
+    ball.startZ = ball.worldZ;
+    ball.currentDistance = 0;
+    
+    if (currentHolder.role === 'gk') {
+        const opposingOutfield = players.filter(p => p.team !== currentHolder.team && p.role !== 'gk');
+        const randomOpponent = opposingOutfield[Math.floor(Math.random() * opposingOutfield.length)];
+        
+        ball.targetX = randomOpponent.homeX;
+        ball.targetZ = randomOpponent.homeZ;
+        ball.state = 'air-lob';
+        ball.speed = 6.5; 
+        ball.holder = null;
+        ball.passCounter = 0; 
+    } else {
+        ball.passCounter++;
+        
+        if (ball.passCounter >= 4) {
+            const opponents = players.filter(p => p.team !== currentHolder.team && p.role !== 'gk');
+            const randomOpponent = opponents[Math.floor(Math.random() * opponents.length)];
+            
+            ball.targetX = randomOpponent.homeX;
+            ball.targetZ = randomOpponent.homeZ;
+            ball.state = 'passing';
+            ball.speed = ball.speed; 
+            ball.holder = null;
+            ball.passCounter = 0;
+        } else {
+            const teammates = players.filter(p => p.team === currentHolder.team && p.id !== currentHolder.id);
+            const randomTeammate = teammates[Math.floor(Math.random() * teammates.length)];
+            
+            ball.targetX = randomTeammate.homeX;
+            ball.targetZ = randomTeammate.homeZ;
+            ball.state = 'passing';
+            ball.speed = ball.speed; 
+            ball.holder = null;
+        }
+    }
+
+    const dx = ball.targetX - ball.startX;
+    const dz = ball.targetZ - ball.startZ;
+    ball.totalDistance = Math.sqrt(dx * dx + dz * dz);
+    if(ball.totalDistance === 0) ball.totalDistance = 1;
+}
+
+ball.holder = players.find(p => p.team === 'A' && p.role !== 'gk');
+
+// --- DRAWING METHODS ---
+function draw3DLine(x1, z1, x2, z2) {
+    const p1 = project(x1, z1);
+    const p2 = project(x2, z2);
+    ctx.beginPath();
+    ctx.moveTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.stroke();
+}
+
+function draw3DSubArc(centerX, centerZ, radius, startAngle, endAngle, segments = 30) {
+    ctx.beginPath();
+    for (let i = 0; i <= segments; i++) {
+        const angle = startAngle + (endAngle - startAngle) * (i / segments);
+        const worldX = centerX + Math.cos(angle) * radius;
+        const worldZ = centerZ + Math.sin(angle) * radius;
+        const screenPos = project(worldX, worldZ);
+        
+        if (i === 0) ctx.moveTo(screenPos.x, screenPos.y);
+        else ctx.lineTo(screenPos.x, screenPos.y);
+    }
+    ctx.stroke();
+}
+
+function draw3DDot(worldX, worldZ, radius) {
+    const screenPos = project(worldX, worldZ);
+    ctx.beginPath();
+    ctx.arc(screenPos.x, screenPos.y, radius * screenPos.scale, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawField() {
+    ctx.strokeStyle = COLORS.lines;
+    ctx.fillStyle = COLORS.lines;
+    ctx.lineWidth = 2.5;
+
+    const stripesCountX = 18; 
+    const stripesCountY = 6;  
+    
+    const stripeWidth = FIELD_VIRTUAL_WIDTH / stripesCountX;
+    const stripeHeight = FIELD_VIRTUAL_LENGTH / stripesCountY;
+    
+    for(let i = 0; i < stripesCountX; i++) {
+        for(let j = 0; j < stripesCountY; j++) {
+            ctx.fillStyle = ((i + j) % 2 === 0) ? COLORS.fieldDark : COLORS.fieldLight;
+            
+            const xLeft = i * stripeWidth;
+            const xRight = (i + 1) * stripeWidth;
+            const zTop = j * stripeHeight;
+            const zBottom = (j + 1) * stripeHeight;
+            
+            const bl = project(xLeft, zTop);
+            const br = project(xRight, zTop);
+            const tr = project(xRight, zBottom);
+            const tl = project(xLeft, zBottom);
+            
+            ctx.beginPath();
+            ctx.moveTo(bl.x, bl.y);
+            ctx.lineTo(br.x, br.y);
+            ctx.lineTo(tr.x, tr.y);
+            ctx.lineTo(tl.x, tl.y);
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    const blf = project(0, 0);
+    const brf = project(FIELD_VIRTUAL_WIDTH, 0);
+    const trf = project(FIELD_VIRTUAL_WIDTH, FIELD_VIRTUAL_LENGTH);
+    const tlf = project(0, FIELD_VIRTUAL_LENGTH);
+    ctx.beginPath();
+    ctx.moveTo(blf.x, blf.y);
+    ctx.lineTo(brf.x, brf.y);
+    ctx.lineTo(trf.x, trf.y);
+    ctx.lineTo(tlf.x, tlf.y);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = COLORS.lines; 
+
+    draw3DLine(FIELD_VIRTUAL_WIDTH / 2, 0, FIELD_VIRTUAL_WIDTH / 2, FIELD_VIRTUAL_LENGTH);
+    
+    const center = project(FIELD_VIRTUAL_WIDTH / 2, FIELD_VIRTUAL_LENGTH / 2);
+    ctx.beginPath();
+    ctx.ellipse(center.x, center.y, 110 * center.scale, 65 * center.scale, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    draw3DDot(FIELD_VIRTUAL_WIDTH / 2, FIELD_VIRTUAL_LENGTH / 2, 4);
+
+    // Left Penalty
+    draw3DLine(0, FIELD_VIRTUAL_LENGTH/2 - 200, 180, FIELD_VIRTUAL_LENGTH/2 - 200);
+    draw3DLine(180, FIELD_VIRTUAL_LENGTH/2 - 200, 180, FIELD_VIRTUAL_LENGTH/2 + 200);
+    draw3DLine(180, FIELD_VIRTUAL_LENGTH/2 + 200, 0, FIELD_VIRTUAL_LENGTH/2 + 200);
+    draw3DLine(0, FIELD_VIRTUAL_LENGTH/2 - 80, 60, FIELD_VIRTUAL_LENGTH/2 - 80);
+    draw3DLine(60, FIELD_VIRTUAL_LENGTH/2 - 80, 60, FIELD_VIRTUAL_LENGTH/2 + 80);
+    draw3DLine(60, FIELD_VIRTUAL_LENGTH/2 + 80, 0, FIELD_VIRTUAL_LENGTH/2 + 80);
+    draw3DDot(120, FIELD_VIRTUAL_LENGTH / 2, 3.5);
+    draw3DSubArc(120, FIELD_VIRTUAL_LENGTH / 2, 110, -Math.PI/2.8, Math.PI/2.8);
+
+    // Right Penalty
+    draw3DLine(FIELD_VIRTUAL_WIDTH, FIELD_VIRTUAL_LENGTH/2 - 200, FIELD_VIRTUAL_WIDTH - 180, FIELD_VIRTUAL_LENGTH/2 - 200);
+    draw3DLine(FIELD_VIRTUAL_WIDTH - 180, FIELD_VIRTUAL_LENGTH/2 - 200, FIELD_VIRTUAL_WIDTH - 180, FIELD_VIRTUAL_LENGTH/2 + 200);
+    draw3DLine(FIELD_VIRTUAL_WIDTH - 180, FIELD_VIRTUAL_LENGTH/2 + 200, FIELD_VIRTUAL_WIDTH, FIELD_VIRTUAL_LENGTH/2 + 200);
+    draw3DLine(FIELD_VIRTUAL_WIDTH, FIELD_VIRTUAL_LENGTH/2 - 80, FIELD_VIRTUAL_WIDTH - 60, FIELD_VIRTUAL_LENGTH/2 - 80);
+    draw3DLine(FIELD_VIRTUAL_WIDTH - 60, FIELD_VIRTUAL_LENGTH/2 - 80, FIELD_VIRTUAL_WIDTH - 60, FIELD_VIRTUAL_LENGTH/2 + 80);
+    draw3DLine(FIELD_VIRTUAL_WIDTH - 60, FIELD_VIRTUAL_LENGTH/2 + 80, FIELD_VIRTUAL_WIDTH, FIELD_VIRTUAL_LENGTH/2 + 80);
+    draw3DDot(FIELD_VIRTUAL_WIDTH - 120, FIELD_VIRTUAL_LENGTH / 2, 3.5);
+    draw3DSubArc(FIELD_VIRTUAL_WIDTH - 120, FIELD_VIRTUAL_LENGTH / 2, 110, Math.PI - Math.PI/2.8, Math.PI + Math.PI/2.8);
+}
+
+function drawBall() {
+    const shadowPos = project(ball.worldX, ball.worldZ, 0);
+    const sRadius = 5.5 * shadowPos.scale;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.beginPath();
+    ctx.arc(shadowPos.x, shadowPos.y, sRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    const ballPos = project(ball.worldX, ball.worldZ, ball.worldY);
+    const bRadius = 5 * ballPos.scale;
+    
+    ctx.fillStyle = COLORS.ball;
+    ctx.beginPath();
+    ctx.arc(ballPos.x, ballPos.y, bRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = COLORS.ballPattern;
+    ctx.beginPath();
+    ctx.arc(ballPos.x, ballPos.y, bRadius * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawPlayers() {
+    const sortedPlayers = [...players].sort((a, b) => a.worldZ - b.worldZ);
+    let telemetryStrings = [];
+
+    sortedPlayers.forEach(p => {
+        const screenPos = project(p.worldX, p.worldZ);
+        const w = 13 * screenPos.scale;
+        const h = 30 * screenPos.scale;
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+        ctx.beginPath();
+        ctx.ellipse(screenPos.x, screenPos.y, w * 0.7, w * 0.35, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = p.color;
+        ctx.fillRect(screenPos.x - w / 2, screenPos.y - h, w, h * 0.65);
+
+        ctx.fillStyle = COLORS.jerseyAccent;
+        ctx.fillRect(screenPos.x - w / 2, screenPos.y - (h * 0.35), w, h * 0.35);
+
+        ctx.fillStyle = '#000000';
+        ctx.font = `${Math.max(6, 11 * screenPos.scale)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(p.number, screenPos.x, screenPos.y - (h * 0.45));
+
+        ctx.fillStyle = '#e0ac69';
+        ctx.beginPath();
+        ctx.arc(screenPos.x, screenPos.y - h - (4 * screenPos.scale), 4 * screenPos.scale, 0, Math.PI * 2);
+        ctx.fill();
+
+        const spatialData = getSpatialSector(p.worldX, p.worldZ);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '9px monospace';
+        ctx.fillText(`${spatialData.sector}`, screenPos.x, screenPos.y + 12);
+
+        if(p.team === 'A' && p.role !== 'gk' && telemetryStrings.length < 10) {
+            telemetryStrings.push(`P${p.number}: ${spatialData.sector} [${spatialData.metrics[0]}m, ${spatialData.metrics[1]}m]`);
+        }
+    });
+
+    telemetryElement.innerHTML = `📡 <b>GROUND TRUTH REGISTER</b><br>` + telemetryStrings.join('<br>');
+}
+
+// --- ENGINE LOGIC SYSTEM LOOP ---
+let time = 0;
+let passDelayTimer = 0;
+
+function update() {
+    time += 0.02;
+
+    players.forEach(p => {
+        let targetX = p.homeX;
+        let targetZ = p.homeZ;
+
+        if (ball.holder && ball.holder.id === p.id) {
+            targetX = p.worldX;
+            targetZ = p.worldZ;
+        } else {
+            targetX += Math.sin(time + p.seed) * 20;
+            targetZ += Math.cos(time * 0.7 + p.seed) * 15;
+        }
+
+        p.worldX += (targetX - p.worldX) * 0.05;
+        p.worldZ += (targetZ - p.worldZ) * 0.05;
+    });
+
+    if (ball.holder) {
+        ball.worldX = ball.holder.worldX;
+        ball.worldZ = ball.holder.worldZ;
+        ball.worldY = 0;
+
+        passDelayTimer++;
+        // Evaluates user-defined latency threshold override dynamically
+        if (passDelayTimer > (window.customPassDelay || 60)) { 
+            findPassTarget();
+            passDelayTimer = 0;
+        }
+    } else {
+        ball.currentDistance += ball.speed;
+        
+        if (ball.currentDistance >= ball.totalDistance) {
+            ball.currentDistance = ball.totalDistance;
+            
+            let closestPlayer = null;
+            let minDist = 99999;
+            
+            players.forEach(p => {
+                const dx = p.worldX - ball.targetX;
+                const dz = p.worldZ - ball.targetZ;
+                const d = Math.sqrt(dx*dx + dz*dz);
+                if (d < minDist) {
+                    minDist = d;
+                    closestPlayer = p;
+                }
+            });
+            
+            ball.holder = closestPlayer;
+            ball.state = 'passing';
+            ball.worldY = 0;
+        }
+
+        const t = ball.currentDistance / ball.totalDistance;
+        ball.worldX = ball.startX + (ball.targetX - ball.startX) * t;
+        ball.worldZ = ball.startZ + (ball.targetZ - ball.startZ) * t;
+
+        if (ball.state === 'air-lob') {
+            ball.worldY = Math.sin(t * Math.PI) * 150; 
+        } else {
+            ball.worldY = 0; 
+        }
+    }
+
+    CAMERA.lookAtX += (ball.worldX - CAMERA.lookAtX) * 0.025;
+    CAMERA.lookAtX = Math.max(280, Math.min(FIELD_VIRTUAL_WIDTH - 280, CAMERA.lookAtX));
+}
+
+function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawField();
+    update();
+    drawPlayers();
+    drawBall();
+    requestAnimationFrame(loop);
+}
+
+// --- NEW REAL-TIME UI INTERACTION HANDLERS ---
+document.getElementById('speedSlider').addEventListener('input', (e) => {
+    const val = parseFloat(e.target.value);
+    document.getElementById('speedVal').innerText = val.toFixed(1);
+    ball.speed = val;
+});
+
+document.getElementById('delaySlider').addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    document.getElementById('delayVal').innerText = val;
+    window.customPassDelay = val;
+});
+
+document.getElementById('fovSlider').addEventListener('input', (e) => {
+    const val = parseInt(e.target.value);
+    document.getElementById('fovVal').innerText = val;
+    CAMERA.fov = val;
+});
+
+function changeTeamColor(team, hex) {
+    if(team === 'A') {
+        COLORS.teamA = hex;
+        players.forEach(p => { if(p.team === 'A') p.color = hex; });
+    } else {
+        COLORS.teamB = hex;
+        players.forEach(p => { if(p.team === 'B') p.color = hex; });
+    }
+}
+
+function resetColors() {
+    COLORS.teamA = '#ff3366';
+    COLORS.teamB = '#00e5ff';
+    players.forEach(p => { p.color = p.team === 'A' ? COLORS.teamA : COLORS.teamB; });
+}
+
+// --- INTERFACE VISIBILITY STATE ENGINE ---
+const dock = document.getElementById('controlDock');
+const toggleBtn = document.getElementById('uiToggleBtn');
+const telemetry = document.getElementById('telemetryOverlay');
+const targetCanvas = document.getElementById('fieldCanvas');
+
+function toggleSidebar() {
+    dock.classList.toggle('hidden');
+    if (dock.classList.contains('hidden')) {
+        toggleBtn.style.left = '20px';
+        toggleBtn.innerText = 'MENU';
+    } else {
+        toggleBtn.style.left = '320px';
+        toggleBtn.innerText = 'CLOSE';
+    }
+}
+
+// Canvas Double-Click Listener for Standard Desktop Contexts
+targetCanvas.addEventListener('dblclick', () => {
+    executePristineToggle();
+});
+
+// Mobile/Automation Touch-Friendly Double-Tap Detection
+let lastTap = 0;
+targetCanvas.addEventListener('touchstart', (e) => {
+    const now = new Date().getTime();
+    const timespan = now - lastTap;
+    if (timespan < 300 && timespan > 0) {
+        executePristineToggle();
+        e.preventDefault(); 
+    }
+    lastTap = now;
+});
+
+function executePristineToggle() {
+    const isPristine = toggleBtn.classList.contains('pristine-capture-mode');
+    
+    if (!isPristine) {
+        dock.classList.add('hidden');
+        toggleBtn.classList.add('pristine-capture-mode');
+        telemetry.classList.add('pristine-capture-mode');
+    } else {
+        toggleBtn.classList.remove('pristine-capture-mode');
+        telemetry.classList.remove('pristine-capture-mode');
+        toggleBtn.style.left = '320px';
+        dock.classList.remove('hidden');
+        toggleBtn.innerText = 'CLOSE';
+    }
+}
+
+// Start simulation engine execution loop
+loop();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,15 @@
+# Byte-compiled / Python execution cache (from python -m http.server)
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local terminal text editor crash/swap files (Vim, Nano, Micro)
+*.swp
+*.swo
+*~
+.nano_history
+
+# Android OS system noise and hidden storage files
+.DS_Store
+.directory
+.cloud
